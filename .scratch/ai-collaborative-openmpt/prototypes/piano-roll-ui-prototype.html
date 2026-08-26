@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PROTOTYPE — OpenMPT Piano Roll Semantics</title>
+  <!-- Three variants of the human-facing Tracker Pattern piano-roll editor, switchable via ?variant=, on a throwaway standalone prototype page. -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111318;
+      --panel: #1b1e25;
+      --panel-2: #232730;
+      --line: #343a46;
+      --line-soft: #292e38;
+      --text: #e6e9ef;
+      --muted: #9ca4b3;
+      --accent: #73a7ff;
+      --play: #ffd166;
+      --danger: #ff6b76;
+      --success: #70d6a5;
+      --c1: #68a8ff;
+      --c2: #bc8cff;
+      --c3: #ff9668;
+      --c4: #63d9ba;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+    button, input, select { font: inherit; }
+    button { color: var(--text); background: #2a2f39; border: 1px solid #424956; border-radius: 4px; padding: 5px 9px; cursor: pointer; }
+    button:hover { background: #363c48; }
+    button.active { background: #315b91; border-color: #669be1; }
+    .prototype-only { color: #ffd08a; font-weight: 700; letter-spacing: .08em; }
+
+    .app { height: 100%; display: grid; grid-template-rows: 31px 38px 1fr 28px; min-width: 980px; }
+    .menu { display: flex; align-items: center; gap: 18px; padding: 0 12px; background: #17191e; border-bottom: 1px solid #08090c; font-size: 12px; }
+    .menu .brand { font-weight: 700; color: white; margin-right: 8px; }
+    .menu .spacer { flex: 1; }
+    .toolbar { display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: linear-gradient(#292d35, #20242b); border-bottom: 1px solid #0b0d10; font-size: 12px; }
+    .toolbar .divider { width: 1px; height: 22px; background: #4a505b; margin: 0 4px; }
+    .toolbar label { color: var(--muted); margin-left: 4px; }
+    .toolbar select, .toolbar input { color: var(--text); background: #171a20; border: 1px solid #424956; padding: 4px 6px; border-radius: 3px; }
+    .statusbar { display: flex; align-items: center; gap: 18px; padding: 0 10px; background: #181b21; border-top: 1px solid #383d47; color: var(--muted); font-size: 11px; }
+    .statusbar strong { color: var(--text); font-weight: 600; }
+    .workspace { min-height: 0; overflow: hidden; }
+    .variant { display: none; width: 100%; height: 100%; }
+    .variant.visible { display: grid; }
+
+    .pane-title { height: 31px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #242832; border-bottom: 1px solid #414754; font-size: 12px; font-weight: 600; }
+    .pane-title .subtle { color: var(--muted); font-weight: 400; }
+    .pane-title .spacer { flex: 1; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #49505d; border-radius: 999px; padding: 2px 7px; font-size: 10px; color: var(--muted); background: #1a1d23; }
+    .badge.warn { color: #ffd28a; border-color: #715b31; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
+    /* Shared standard horizontal piano-roll canvas */
+    .roll-shell { position: relative; min-height: 0; overflow: hidden; background: #181b21; }
+    .roll-top { height: 27px; margin-left: 48px; display: grid; grid-template-columns: repeat(16, 1fr); background: #22262e; border-bottom: 1px solid #414754; color: #9da5b3; font: 10px Consolas, monospace; }
+    .roll-top span { padding: 6px 3px; border-left: 1px solid #373d48; }
+    .keyboard { position: absolute; left: 0; top: 27px; bottom: 0; width: 48px; z-index: 2; background: #d9dde4; border-right: 1px solid #050608; }
+    .key { position: absolute; left: 0; right: 0; height: calc(100% / 12); border-bottom: 1px solid #8f949e; color: #252830; font: 9px Consolas, monospace; padding: 2px; }
+    .key.black { width: 30px; background: #252832; color: #d8dce4; z-index: 2; border-color: #0d0e12; }
+    .roll-grid { position: absolute; left: 48px; right: 0; top: 27px; bottom: 0; background-color: #171a20; background-image: linear-gradient(to right, rgba(255,255,255,.11) 1px, transparent 1px), linear-gradient(to right, rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,.05) 1px, transparent 1px); background-size: 25% 100%, 6.25% 100%, 100% 8.333%; }
+    .roll-grid::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to bottom, transparent 0 41.5%, rgba(0,0,0,.18) 41.5% 50%, transparent 50% 91.5%, rgba(0,0,0,.18) 91.5%); }
+    .playhead-v { position: absolute; top: 0; bottom: 0; left: 42%; width: 2px; background: var(--play); box-shadow: 0 0 8px #ffd16688; z-index: 5; pointer-events: none; }
+    .note { position: absolute; height: 7.2%; min-height: 13px; border: 1px solid rgba(255,255,255,.35); border-radius: 3px; padding: 2px 5px; color: #091019; font: 600 10px Consolas, monospace; overflow: hidden; white-space: nowrap; z-index: 3; cursor: pointer; box-shadow: inset 3px 0 rgba(255,255,255,.55); }
+    .note:hover, .note.selected { outline: 2px solid white; outline-offset: 1px; z-index: 6; }
+    .note.implicit { color: var(--text); border-style: dashed; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.11) 0 4px, rgba(0,0,0,.08) 4px 8px) !important; }
+    .note.delayed::before { content: "Δ"; display: inline-block; margin-right: 3px; color: #2c1f02; }
+    .note.collision { border-right: 4px solid var(--danger); }
+    .off-cap { position: absolute; right: -2px; top: -1px; bottom: -1px; width: 5px; background: #fff9; }
+    .event-marker { position: absolute; width: 14px; height: 14px; transform: rotate(45deg); border: 1px solid #ffe3a4; background: #776029; z-index: 4; cursor: pointer; }
+    .event-marker span { display: block; transform: rotate(-45deg); font: 8px Consolas, monospace; color: white; margin: 1px 0 0 2px; }
+    .selection-box { position: absolute; left: 24%; top: 15%; width: 29%; height: 57%; border: 1px solid #8ebaff; background: #73a7ff16; z-index: 2; pointer-events: none; }
+
+    /* Variant A: synchronized split */
+    #variantA { grid-template-columns: 38% 62%; }
+    .tracker-pane { display: grid; grid-template-rows: 31px 1fr 90px; min-width: 0; border-right: 4px solid #0b0d10; }
+    .pattern-table { overflow: hidden; background: #12151a; font: 12px/20px Consolas, monospace; }
+    .pattern-head, .pattern-row { display: grid; grid-template-columns: 40px repeat(4, minmax(112px, 1fr)); }
+    .pattern-head { position: sticky; top: 0; height: 24px; background: #2c313b; color: #b9c0cc; border-bottom: 1px solid #555d6a; }
+    .pattern-head span, .pattern-row span { padding: 1px 5px; border-right: 1px solid #303641; white-space: pre; overflow: hidden; }
+    .pattern-row { height: 20px; color: #cdd3dd; }
+    .pattern-row:nth-child(4n+2) { background: #1c2027; }
+    .pattern-row.current { background: #746229; color: white; }
+    .pattern-row .rowno { color: #697384; text-align: right; }
+    .pattern-row .n { color: #77afff; }
+    .pattern-row .i { color: #e4a4ff; }
+    .pattern-row .fx { color: #ffb477; }
+    .split-details { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #363c46; border-top: 1px solid #444b57; }
+    .mini-panel { background: #20242c; padding: 8px; font-size: 11px; color: var(--muted); }
+    .mini-panel strong { display: block; color: var(--text); margin-bottom: 6px; }
+    .roll-pane-a { display: grid; grid-template-rows: 31px 1fr 90px; min-width: 0; }
+    .legend { display: flex; gap: 14px; padding: 8px 10px; background: #20242c; border-top: 1px solid #414754; color: var(--muted); font-size: 10px; align-items: flex-start; }
+    .legend > div { max-width: 190px; }
+
+    /* Variant B: canvas + inspector + lanes */
+    #variantB { grid-template-columns: 172px 1fr 248px; grid-template-rows: 1fr; }
+    .channel-sidebar { background: #1a1d23; border-right: 1px solid #3d434e; display: grid; grid-template-rows: 31px auto 1fr; }
+    .channel-list { padding: 8px; }
+    .channel-item { display: grid; grid-template-columns: 17px 1fr auto; align-items: center; gap: 7px; padding: 8px 6px; margin-bottom: 4px; border: 1px solid transparent; border-radius: 5px; font-size: 11px; }
+    .channel-item.active { border-color: #4d6381; background: #263346; }
+    .channel-item input { margin: 0; }
+    .navigator { margin: 0 8px 8px; border: 1px solid #3c424d; border-radius: 5px; background: #14171c; padding: 7px; font: 10px Consolas, monospace; color: var(--muted); }
+    .nav-pattern { height: 22px; margin: 4px 0; background: linear-gradient(90deg, #68a8ff55 0 35%, #bc8cff55 35% 64%, #ff966855 64%); border: 1px solid #59616e; }
+    .main-canvas-b { display: grid; grid-template-rows: 31px 1fr 152px; min-width: 0; }
+    .lanes { display: grid; grid-template-rows: 28px repeat(3, 1fr); background: #171a20; border-top: 1px solid #4a505b; min-height: 0; }
+    .lane-tabs { display: flex; gap: 4px; align-items: center; padding: 3px 7px; background: #252932; }
+    .lane { position: relative; display: grid; grid-template-columns: 74px 1fr; border-top: 1px solid #323844; min-height: 0; }
+    .lane-label { padding: 6px 8px; background: #20242c; color: var(--muted); font-size: 10px; border-right: 1px solid #3a414c; }
+    .lane-data { position: relative; background-image: linear-gradient(to right, #ffffff12 1px, transparent 1px); background-size: 6.25% 100%; }
+    .bar { position: absolute; bottom: 2px; width: 8px; background: #7caeff; border-radius: 2px 2px 0 0; }
+    .diamond { position: absolute; width: 8px; height: 8px; top: 45%; transform: rotate(45deg); background: #ffd166; }
+    .inspector { background: #1b1e25; border-left: 1px solid #3d434e; display: grid; grid-template-rows: 31px auto auto 1fr; }
+    .property-group { padding: 10px; border-bottom: 1px solid #363c46; }
+    .property-group h3 { font-size: 11px; margin: 0 0 9px; color: #bec5d0; text-transform: uppercase; letter-spacing: .08em; }
+    .property { display: grid; grid-template-columns: 1fr 105px; align-items: center; margin: 6px 0; font-size: 11px; color: var(--muted); }
+    .property output { color: var(--text); font-family: Consolas, monospace; background: #111419; border: 1px solid #363d48; border-radius: 3px; padding: 4px; }
+    .semantic-card { margin: 10px; padding: 10px; border: 1px solid #6c5630; background: #2d281e; border-radius: 5px; font-size: 11px; color: #d7c8a8; }
+
+    /* Variant C: tracker-flow, time down */
+    #variantC { grid-template-columns: 210px 1fr; }
+    .flow-left { display: grid; grid-template-rows: 31px auto 1fr; background: #1b1e25; border-right: 1px solid #424955; }
+    .flow-mode { padding: 10px; border-bottom: 1px solid #383e49; }
+    .flow-mode h3 { font-size: 12px; margin: 0 0 8px; }
+    .flow-mode p { font-size: 11px; color: var(--muted); margin: 4px 0 10px; line-height: 1.45; }
+    .event-stack { padding: 8px; overflow: hidden; }
+    .event-card { border-left: 3px solid; background: #242831; margin-bottom: 7px; padding: 7px 8px; font-size: 10px; color: var(--muted); }
+    .event-card strong { display: block; color: var(--text); margin-bottom: 3px; }
+    .flow-main { display: grid; grid-template-rows: 31px 1fr; min-width: 0; }
+    .flow-scroll { position: relative; display: grid; grid-template-columns: 54px 1fr; overflow: hidden; background: #15181d; }
+    .row-ruler { position: relative; background: #20242b; border-right: 1px solid #424955; font: 10px Consolas, monospace; color: var(--muted); }
+    .row-tick { position: absolute; left: 0; right: 0; height: 25px; padding: 6px 7px; border-top: 1px solid #343a45; text-align: right; }
+    .flow-grid { position: relative; margin-top: 27px; margin-bottom: 12px; background-image: linear-gradient(to bottom, rgba(255,255,255,.10) 1px, transparent 1px), linear-gradient(to right, rgba(255,255,255,.055) 1px, transparent 1px); background-size: 100% 25px, calc(100% / 24) 100%; }
+    .pitch-head { position: absolute; left: 54px; right: 0; top: 0; height: 27px; display: grid; grid-template-columns: repeat(24, 1fr); background: #2a2e36; z-index: 4; border-bottom: 1px solid #4b525e; }
+    .pitch-head span { font: 9px Consolas, monospace; color: #aeb5c1; padding: 7px 2px; border-left: 1px solid #3d434d; text-align: center; }
+    .flow-note { position: absolute; height: 20px; border: 1px solid #ffffff66; border-radius: 3px; font: 9px Consolas, monospace; color: #11151b; padding: 3px; cursor: pointer; z-index: 2; }
+    .flow-note.implicit { border-bottom-style: dashed; color: white; background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.12) 0 4px, rgba(0,0,0,.08) 4px 8px) !important; }
+    .flow-note.selected { outline: 2px solid white; }
+    .playhead-h { position: absolute; left: 0; right: 0; top: 42%; height: 2px; background: var(--play); box-shadow: 0 0 8px #ffd16699; z-index: 3; }
+    .channel-rail { position: absolute; left: 0; width: 6px; border-radius: 0 2px 2px 0; opacity: .9; }
+
+    /* Persistent state disclosure and variant switcher */
+    .state-drawer { position: fixed; right: 12px; bottom: 54px; width: 310px; max-height: 240px; overflow: auto; z-index: 30; background: #090b0eea; border: 1px solid #555d69; border-radius: 7px; box-shadow: 0 8px 32px #000a; font: 10px/1.45 Consolas, monospace; }
+    .state-drawer summary { cursor: pointer; padding: 7px 10px; color: #cdd5e1; font-family: "Segoe UI", sans-serif; font-size: 11px; }
+    .state-drawer pre { margin: 0; padding: 0 10px 10px; color: #8fd6b5; white-space: pre-wrap; }
+    .switcher { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 40; display: grid; grid-template-columns: 38px minmax(230px, auto) 38px; align-items: center; background: #050609ee; color: white; border: 1px solid #777f8c; border-radius: 999px; box-shadow: 0 8px 30px #000c; padding: 4px; }
+    .switcher button { border-radius: 999px; border: 0; background: #202631; font-size: 18px; line-height: 24px; padding: 2px 8px; }
+    .variant-label { text-align: center; font-size: 11px; padding: 0 14px; }
+    .variant-label strong { color: #9dc2ff; }
+
+    @media (max-height: 700px) {
+      .state-drawer { max-height: 150px; }
+      .roll-pane-a, .tracker-pane { grid-template-rows: 31px 1fr 72px; }
+      .main-canvas-b { grid-template-rows: 31px 1fr 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="menu">
+      <span class="brand">OpenMPT for AI</span>
+      <span>文件</span><span>查看</span><span>播放</span><span>编辑</span><span>插入</span><span>帮助</span>
+      <span class="spacer"></span>
+      <span class="prototype-only">THROWAWAY PROTOTYPE</span>
+    </header>
+
+    <nav class="toolbar" aria-label="Pattern editor toolbar">
+      <button id="playButton" title="Toggle playback">▶</button>
+      <button title="Stop">■</button>
+      <button title="Record">●</button>
+      <span class="divider"></span>
+      <label>Pattern</label><select><option>12 · Verse A</option></select>
+      <label>乐器</label><select><option>03 · Glass Keys</option></select>
+      <label>编辑步长</label><select id="editStep"><option>1 row</option><option>2 rows</option><option>4 rows</option></select>
+      <span class="divider"></span>
+      <button class="active" data-mode="select">选择</button>
+      <button data-mode="draw">绘制</button>
+      <button data-mode="erase">擦除</button>
+      <span class="divider"></span>
+      <label><input id="snapToggle" type="checkbox" checked> 对齐行</label>
+      <label><input id="effectToggle" type="checkbox" checked> 效果标记</label>
+    </nav>
+
+    <main class="workspace">
+      <section id="variantA" class="variant" aria-label="Variant A synchronized split view">
+        <div class="tracker-pane">
+          <div class="pane-title">Pattern Editor <span class="subtle">原始数据始终可见</span><span class="spacer"></span><span class="badge"><span class="dot" style="background:var(--play)"></span>Row 26</span></div>
+          <div class="pattern-table" id="patternTable"></div>
+          <div class="split-details">
+            <div class="mini-panel"><strong>同步选区</strong>Rows 16–47 · Channels 1–4<br>钢琴卷帘选中音符会反选对应 pattern cell。</div>
+            <div class="mini-panel"><strong>投影警告</strong><span style="color:#ffd28a">2 个隐式持续音符</span><br>未写入 note-off；卷帘使用虚线延伸。</div>
+          </div>
+        </div>
+        <div class="roll-pane-a">
+          <div class="pane-title">Piano Roll <span class="subtle">标准时间横向</span><span class="spacer"></span><span class="badge warn">Pattern 投影，不是 MIDI clip</span></div>
+          <div class="roll-shell" data-roll="A"></div>
+          <div class="legend">
+            <div><span class="dot" style="background:var(--c1)"></span> 实心末端：明确 note-off / cut</div>
+            <div><span class="dot" style="background:var(--c2)"></span> 虚线填充：持续时间由后续事件限制</div>
+            <div>Δ：note delay；◆：非音符效果；红色末端：同通道后续音符接管</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="variantB" class="variant" aria-label="Variant B focused canvas">
+        <aside class="channel-sidebar">
+          <div class="pane-title">Channels</div>
+          <div class="channel-list">
+            <div class="channel-item active"><input type="checkbox" checked><span><span class="dot" style="background:var(--c1)"></span> 01 Lead</span><small>M</small></div>
+            <div class="channel-item"><input type="checkbox" checked><span><span class="dot" style="background:var(--c2)"></span> 02 Chords</span><small>M</small></div>
+            <div class="channel-item"><input type="checkbox" checked><span><span class="dot" style="background:var(--c3)"></span> 03 Bass</span><small>M</small></div>
+            <div class="channel-item"><input type="checkbox" checked><span><span class="dot" style="background:var(--c4)"></span> 04 Perc</span><small>M</small></div>
+          </div>
+          <div class="navigator"><strong>Sequence 0</strong><br>11 · Intro<div class="nav-pattern"></div><strong>12 · Verse A</strong> ← current<div class="nav-pattern"></div>13 · Fill<br>14 · Verse B</div>
+        </aside>
+        <div class="main-canvas-b">
+          <div class="pane-title">Piano Roll Workspace <span class="subtle">音符优先，tracker 细节按需展开</span><span class="spacer"></span><span class="badge">Rows 0–63</span></div>
+          <div class="roll-shell" data-roll="B"></div>
+          <div class="lanes">
+            <div class="lane-tabs"><button class="active">力度</button><button>Note Delay</button><button>效果</button><span class="spacer"></span><span class="badge warn">3 个原生 tracker 事件</span></div>
+            <div class="lane"><div class="lane-label">Volume</div><div class="lane-data" id="volumeLane"></div></div>
+            <div class="lane"><div class="lane-label">Note Delay</div><div class="lane-data"><span class="diamond" style="left:22%"></span><span class="diamond" style="left:70%"></span></div></div>
+            <div class="lane"><div class="lane-label">Effect</div><div class="lane-data"><span class="badge warn" style="position:absolute;left:40%;top:5px">D03</span><span class="badge" style="position:absolute;left:74%;top:5px">H47</span></div></div>
+          </div>
+        </div>
+        <aside class="inspector">
+          <div class="pane-title">Event Inspector</div>
+          <div class="property-group">
+            <h3>选中音符</h3>
+            <div class="property"><span>Note</span><output data-prop="note">C-5</output></div>
+            <div class="property"><span>Rows</span><output data-prop="rows">16 → 24</output></div>
+            <div class="property"><span>Channel</span><output data-prop="channel">01 Lead</output></div>
+            <div class="property"><span>Instrument</span><output>03</output></div>
+            <div class="property"><span>Volume</span><output>v48</output></div>
+          </div>
+          <div class="property-group">
+            <h3>结束语义</h3>
+            <label style="font-size:11px"><input type="radio" name="end" checked> 写入明确 Note Off</label><br><br>
+            <label style="font-size:11px"><input type="radio" name="end"> 保持单次触发</label>
+          </div>
+          <div class="semantic-card"><strong>不是 MIDI duration</strong><br><br>拖动右边缘时，系统将修改或插入 tracker 的 note-off/cut；不会创建平行的持续时间字段。</div>
+        </aside>
+      </section>
+
+      <section id="variantC" class="variant" aria-label="Variant C tracker-flow roll">
+        <aside class="flow-left">
+          <div class="pane-title">Tracker-flow Roll</div>
+          <div class="flow-mode">
+            <h3>时间向下，音高向右</h3>
+            <p>保持 OpenMPT 的阅读方向：播放向下推进，pattern row 与钢琴卷帘无需旋转心智模型。</p>
+            <button class="active">全部通道叠加</button> <button>单通道</button>
+          </div>
+          <div class="event-stack">
+            <div class="event-card" style="border-color:var(--c1)"><strong>Row 16 · C-5 · Ch 01</strong>明确 note-off 位于 Row 24</div>
+            <div class="event-card" style="border-color:var(--c2)"><strong>Row 20 · E-5 · Ch 02</strong>隐式持续至同通道下一音符</div>
+            <div class="event-card" style="border-color:var(--play)"><strong>Row 26 · D03</strong>Pattern break · 不伪装成音符</div>
+            <div class="event-card" style="border-color:var(--danger)"><strong>Row 34 · Channel collision</strong>后一音符接管 Ch 01 声音语义</div>
+          </div>
+        </aside>
+        <div class="flow-main">
+          <div class="pane-title">Pattern 12 · Verse A <span class="subtle">Rows 0–63</span><span class="spacer"></span><span class="badge warn">实验性方向</span></div>
+          <div class="flow-scroll" id="flowScroll"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="statusbar">
+      <span>状态：<strong id="transportState">Stopped</strong></span>
+      <span>位置：<strong>Sequence 0 / Order 11 / Pattern 12 / Row 26</strong></span>
+      <span>修订：<strong>rev-0042</strong></span>
+      <span>选择：<strong id="selectionSummary">C-5 · Ch 01 · Rows 16–24</strong></span>
+      <span style="margin-left:auto">Prototype state only · no file writes</span>
+    </footer>
+  </div>
+
+  <details class="state-drawer" open>
+    <summary>完整原型状态（每次操作同步更新）</summary>
+    <pre id="stateOutput"></pre>
+  </details>
+
+  <nav class="switcher" aria-label="Prototype variants">
+    <button id="prevVariant" aria-label="Previous variant">←</button>
+    <div class="variant-label"><span class="prototype-only">PROTOTYPE</span><br><strong id="variantName"></strong></div>
+    <button id="nextVariant" aria-label="Next variant">→</button>
+  </nav>
+
+  <script>
+    const variants = [
+      { key: 'A', name: '同步分屏：Tracker + Piano Roll' },
+      { key: 'B', name: '专注画布：Roll + Inspector + Lanes' },
+      { key: 'C', name: 'Tracker-flow：时间向下' },
+    ];
+
+    const notes = [
+      { id:'n1', note:'C-5', pitch:0.36, row:16, end:24, ch:1, color:'var(--c1)', explicit:true, volume:48 },
+      { id:'n2', note:'E-5', pitch:0.19, row:20, end:34, ch:2, color:'var(--c2)', explicit:false, volume:42 },
+      { id:'n3', note:'G-4', pitch:0.53, row:24, end:32, ch:3, color:'var(--c3)', explicit:true, volume:38, delay:3 },
+      { id:'n4', note:'D-5', pitch:0.28, row:32, end:40, ch:1, color:'var(--c1)', explicit:false, volume:45, collision:true },
+      { id:'n5', note:'G-5', pitch:0.03, row:36, end:48, ch:2, color:'var(--c2)', explicit:true, volume:50 },
+      { id:'n6', note:'C-4', pitch:0.78, row:8, end:24, ch:3, color:'var(--c3)', explicit:true, volume:36 },
+      { id:'n7', note:'A-4', pitch:0.44, row:44, end:56, ch:1, color:'var(--c1)', explicit:true, volume:47, delay:2 },
+      { id:'n8', note:'F-5', pitch:0.11, row:52, end:60, ch:2, color:'var(--c2)', explicit:true, volume:44 },
+    ];
+
+    const state = {
+      variant: 'A',
+      revision: 'rev-0042',
+      transport: 'stopped',
+      sequence: 0,
+      order: 11,
+      pattern: 12,
+      row: 26,
+      mode: 'select',
+      snapToRows: true,
+      showEffects: true,
+      selection: { noteId:'n1', note:'C-5', channel:1, rows:[16,24] },
+      projection: { explicitEnds:6, implicitEnds:2, delayedNotes:2, trackerOnlyEvents:3, collisions:1 },
+    };
+
+    function renderKeyboard(shell) {
+      const labels = ['B5','A♯5','A5','G♯5','G5','F♯5','F5','E5','D♯5','D5','C♯5','C5'];
+      const kb = document.createElement('div'); kb.className = 'keyboard';
+      labels.forEach((label, i) => {
+        const key = document.createElement('div');
+        key.className = 'key' + (label.includes('♯') ? ' black' : '');
+        key.style.top = `${i * 8.333}%`; key.textContent = label; kb.appendChild(key);
+      });
+      shell.appendChild(kb);
+    }
+
+    function renderHorizontalRoll(shell) {
+      const top = document.createElement('div'); top.className = 'roll-top';
+      for (let i=0;i<16;i++) { const s=document.createElement('span'); s.textContent=String(i*4).padStart(2,'0'); top.appendChild(s); }
+      shell.appendChild(top); renderKeyboard(shell);
+      const grid = document.createElement('div'); grid.className='roll-grid';
+      const selection = document.createElement('div'); selection.className='selection-box'; grid.appendChild(selection);
+      const play = document.createElement('div'); play.className='playhead-v'; grid.appendChild(play);
+      notes.forEach(n => {
+        const el=document.createElement('div');
+        el.className='note' + (!n.explicit?' implicit':'') + (n.delay?' delayed':'') + (n.collision?' collision':'') + (n.id===state.selection.noteId?' selected':'');
+        el.dataset.noteId=n.id; el.style.left=`${n.row/64*100}%`; el.style.width=`${Math.max((n.end-n.row)/64*100,3)}%`; el.style.top=`${n.pitch*92}%`; el.style.background=n.color; el.textContent=`${n.note} · Ch${String(n.ch).padStart(2,'0')}`;
+        if(n.explicit){ const cap=document.createElement('span'); cap.className='off-cap'; el.appendChild(cap); }
+        el.addEventListener('click',()=>selectNote(n)); grid.appendChild(el);
+      });
+      [{x:26,y:66,label:'D'}, {x:42,y:82,label:'H'}, {x:54,y:33,label:'S'}].forEach(m=>{
+        const el=document.createElement('div'); el.className='event-marker'; el.style.left=`${m.x/64*100}%`; el.style.top=`${m.y}%`; el.innerHTML=`<span>${m.label}</span>`; el.title='Tracker-only effect event'; grid.appendChild(el);
+      });
+      shell.appendChild(grid);
+    }
+
+    function renderPattern() {
+      const table=document.getElementById('patternTable');
+      table.innerHTML='<div class="pattern-head"><span>Row</span><span>Ch 01 · Lead</span><span>Ch 02 · Chords</span><span>Ch 03 · Bass</span><span>Ch 04 · Perc</span></div>';
+      const events={8:['...........','...........','<b class="n">C-4</b><b class="i">03</b>v36...','C-5.04...'],16:['<b class="n">C-5</b><b class="i">03</b>v48...','...........','...........','...........'],20:['...........','<b class="n">E-5</b><b class="i">03</b>v42...','...........','...........'],24:['OFF........','...........','<b class="n">G-4</b><b class="i">02</b>v38SD3','...........'],26:['...........','...........','...........','...<b class="fx">D03</b>....'],32:['<b class="n">D-5</b><b class="i">03</b>v45...','...........','OFF........','...........'],34:['CUT........','<b class="n">A-5</b><b class="i">03</b>v40...','...........','...........'],36:['...........','<b class="n">G-5</b><b class="i">03</b>v50...','...........','...........']};
+      for(let r=8;r<40;r+=2){ const row=document.createElement('div'); row.className='pattern-row'+(r===26?' current':''); const vals=events[r]||['...........','...........','...........','...........']; row.innerHTML=`<span class="rowno">${String(r).padStart(3,'0')}</span>${vals.map(v=>`<span>${v}</span>`).join('')}`; table.appendChild(row); }
+    }
+
+    function renderLanes(){ const lane=document.getElementById('volumeLane'); notes.forEach(n=>{const b=document.createElement('span');b.className='bar';b.style.left=`${n.row/64*100}%`;b.style.height=`${Math.max(n.volume/64*100,15)}%`;b.style.background=n.color;lane.appendChild(b);}); }
+
+    function renderFlow(){
+      const shell=document.getElementById('flowScroll');
+      const ruler=document.createElement('div'); ruler.className='row-ruler';
+      for(let r=0;r<=60;r+=4){const t=document.createElement('div');t.className='row-tick';t.style.top=`${r/64*calcFlowHeight()}px`;t.textContent=String(r).padStart(2,'0');ruler.appendChild(t);} shell.appendChild(ruler);
+      const head=document.createElement('div');head.className='pitch-head';const pitch=['C4','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B','C5','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];pitch.forEach(p=>{const s=document.createElement('span');s.textContent=p;head.appendChild(s);});shell.appendChild(head);
+      const grid=document.createElement('div');grid.className='flow-grid';grid.style.height=`${calcFlowHeight()}px`;
+      const play=document.createElement('div');play.className='playhead-h';grid.appendChild(play);
+      [1,2,3,4].forEach((ch,i)=>{const rail=document.createElement('span');rail.className='channel-rail';rail.style.top=`${i*25}%`;rail.style.height='24%';rail.style.background=`var(--c${ch})`;grid.appendChild(rail);});
+      notes.forEach(n=>{const el=document.createElement('div');el.className='flow-note'+(!n.explicit?' implicit':'')+(n.id===state.selection.noteId?' selected':'');el.dataset.noteId=n.id;const pitchIndex=Math.min(23,Math.max(0,Math.round((.82-n.pitch)*24)));el.style.left=`${pitchIndex/24*100}%`;el.style.width=`${100/24}%`;el.style.top=`${n.row/64*100}%`;el.style.height=`${Math.max((n.end-n.row)/64*100,3)}%`;el.style.background=n.color;el.textContent=`${n.note} C${n.ch}`;el.addEventListener('click',()=>selectNote(n));grid.appendChild(el);});
+      shell.appendChild(grid);
+    }
+
+    function calcFlowHeight(){ return Math.max(560, window.innerHeight-125); }
+
+    function selectNote(n){
+      state.selection={noteId:n.id,note:n.note,channel:n.ch,rows:[n.row,n.end]};
+      document.getElementById('selectionSummary').textContent=`${n.note} · Ch ${String(n.ch).padStart(2,'0')} · Rows ${n.row}–${n.end}`;
+      document.querySelectorAll('.note,.flow-note').forEach(el=>el.classList.toggle('selected',el.dataset.noteId===n.id));
+      document.querySelectorAll('[data-prop="note"]').forEach(el=>el.textContent=n.note);
+      document.querySelectorAll('[data-prop="rows"]').forEach(el=>el.textContent=`${n.row} → ${n.end}`);
+      document.querySelectorAll('[data-prop="channel"]').forEach(el=>el.textContent=`${String(n.ch).padStart(2,'0')} ${['Lead','Chords','Bass','Perc'][n.ch-1]}`);
+      updateState();
+    }
+
+    function setVariant(key, push=true){
+      if(!variants.some(v=>v.key===key)) key='A'; state.variant=key;
+      document.querySelectorAll('.variant').forEach(el=>el.classList.remove('visible'));
+      document.getElementById(`variant${key}`).classList.add('visible');
+      const meta=variants.find(v=>v.key===key);document.getElementById('variantName').textContent=`${meta.key} · ${meta.name}`;
+      if(push){const url=new URL(location.href);url.searchParams.set('variant',key);history.replaceState({},'',url);}
+      updateState();
+    }
+
+    function cycle(delta){const i=variants.findIndex(v=>v.key===state.variant);setVariant(variants[(i+delta+variants.length)%variants.length].key);}
+    function updateState(){document.getElementById('stateOutput').textContent=JSON.stringify(state,null,2);}
+
+    document.querySelectorAll('[data-roll]').forEach(renderHorizontalRoll); renderPattern(); renderLanes(); renderFlow();
+    document.getElementById('prevVariant').addEventListener('click',()=>cycle(-1));
+    document.getElementById('nextVariant').addEventListener('click',()=>cycle(1));
+    document.addEventListener('keydown',e=>{const tag=e.target.tagName;if(['INPUT','TEXTAREA','SELECT'].includes(tag)||e.target.isContentEditable)return;if(e.key==='ArrowLeft')cycle(-1);if(e.key==='ArrowRight')cycle(1);});
+    document.getElementById('playButton').addEventListener('click',e=>{state.transport=state.transport==='playing'?'stopped':'playing';e.currentTarget.textContent=state.transport==='playing'?'❚❚':'▶';document.getElementById('transportState').textContent=state.transport==='playing'?'Playing':'Stopped';updateState();});
+    document.querySelectorAll('[data-mode]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));btn.classList.add('active');state.mode=btn.dataset.mode;updateState();}));
+    document.getElementById('snapToggle').addEventListener('change',e=>{state.snapToRows=e.target.checked;updateState();});
+    document.getElementById('effectToggle').addEventListener('change',e=>{state.showEffects=e.target.checked;document.querySelectorAll('.event-marker').forEach(x=>x.style.display=e.target.checked?'block':'none');updateState();});
+    setVariant(new URL(location.href).searchParams.get('variant')||'A',false);
+  </script>
+</body>
+</html>
