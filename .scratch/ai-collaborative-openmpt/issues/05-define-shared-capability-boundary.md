@@ -31,6 +31,8 @@ The facade contract requires:
 
 Legacy functionality migrates into this layer only after it can meet that contract. The first implementation proves the invariants with bounded Pattern queries and edits, then expands to the closed-loop composition boundary below.
 
+**Pattern storage, format-limit validation, supported Pattern transforms, domain-local undo/redo, playback, and offline audio rendering reuse the original OpenMPT implementation.** The new facade wraps those implementations with immutable data contracts, revision checks, transaction coordination, typed failures, and events. Reuse of a legacy implementation does not waive any facade invariant or imply that an existing MFC handler is itself a shared capability.
+
 ### First shared capability set
 
 The first release targets the actual composition loop rather than broad menu coverage.

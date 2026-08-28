@@ -29,6 +29,8 @@ The human verdict was supplied on 2026-08-27 and is recorded below.
 
 Adopt **Variant A's synchronized split workspace** as the primary Piano Roll design. The Tracker Pattern remains visible beside a conventional time-horizontal Piano Roll, and both surfaces edit the same canonical pattern data.
 
+**The canonical Tracker Pattern model, `ModCommand` event semantics, existing Pattern edit algorithms, and Pattern undo/redo reuse the original OpenMPT implementation.** The Piano Roll adds a synchronized projection and interaction adapter over those implementations; it does not introduce a parallel note-duration model, duplicate Pattern storage, or a separate undo history.
+
 Add a **Piano Roll focus layout option** derived from Variant B rather than keeping Variant B as a separate editor:
 
 - horizontally narrow the Tracker pane;

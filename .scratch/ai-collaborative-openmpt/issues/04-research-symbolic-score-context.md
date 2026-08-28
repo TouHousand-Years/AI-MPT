@@ -17,6 +17,8 @@ Which symbolic representations can faithfully and efficiently convey an OpenMPT 
 
 Use a versioned, sparse **OpenMPT Score Context JSON** as the canonical AI representation. It should be a semantic projection of the pinned OpenMPT baseline, not a dump of C++ memory and not a piano-roll model. Preserve the pattern grid and commands exactly enough to round-trip a selected fragment: orders/pattern identity, row and channel coordinates, note or special-note value, instrument, volume command/value, effect command/parameter, pattern signature and swing, plus the project-level timing and compatibility state needed to interpret them.
 
+**The Tracker event vocabulary and Pattern structure reuse the original OpenMPT `ModCommand` and `CPattern` implementation. The optional clipboard projection reuses the original OpenMPT `PatternClipboard` serializer and parser.** The project adds only the revision-bound semantic JSON mapping, structural range identity, completeness/provenance envelope, and MCP presentation; it does not redefine Tracker commands or fork the clipboard grammar.
+
 Offer OpenMPT clipboard text as an optional compact projection for prompt display and debugging. Offer MIDI and MusicXML only as explicitly **lossy derived views** for models or external systems that benefit from those vocabularies; never accept either as authoritative evidence of the current project state.
 
 ### Comparison

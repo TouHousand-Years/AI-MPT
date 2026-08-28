@@ -47,6 +47,8 @@ The human collaborator confirmed the corrected inspect/compare behavior on 2026-
 
 ### Proposal construction and handoff
 
+**Supported Pattern operations and domain-local undo/redo reuse the original OpenMPT implementation through the Application Capability layer.** The project adds the private candidate state, Change Proposal and Review Unit model, accepted-subset identity, cross-domain transaction coordination, revision/event semantics, and Operation Receipt. Existing OpenMPT undo buffers are implementation material for the final commit, not a substitute for this review workflow.
+
 A human request names the goal and scope; the application atomically captures the target document identity, base revision, and informing Context Package. The Agent works under the visible, cancellable Agent Edit Session from issue 05 and builds a private candidate state rather than exposing intermediate edits as project state. Request cancellation discards that candidate and leaves the document unchanged.
 
 Successful generation hands off one immutable Change Proposal and releases Agent edit authority. The proposal records its ID, document identity, base revision, informing Package, generator provenance, creation time, affected ranges and domains, semantic operations, impact classifications, and preview evidence. Human navigation, comparison, and audition remain available throughout review; human writes may resume after handoff, with any later document revision making the proposal stale.

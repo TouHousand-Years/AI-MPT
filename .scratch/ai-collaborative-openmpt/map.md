@@ -15,6 +15,7 @@ An implementation-ready product and architecture specification for an independen
 - AI changes are proposal-first, revision-bound, atomic, auditable, and undoable. Read-only analysis, preview generation, and transport controls may use a lower approval tier.
 - AI audition uses bounded offline rendering for a Mini Audio Reviewer, whose natural-language opinion can accompany Score Context; the Main Agent does not require native audio input in the first release.
 - Prefer a local MCP sidecar and a shared Application Capability layer over GUI automation or embedding AI protocol handling in the audio/UI core.
+- **Reuse the original OpenMPT implementation** for the canonical Tracker model and event semantics, format validation and I/O, existing Pattern edit algorithms, domain-local undo/redo, playback and offline rendering, Plugin Bridge/helpers, portable-mode primitives, and upstream package/license materials. New Piano Roll, Application Capability, AI/MCP, transaction, review, and independent-distribution code wraps or adapts those implementations rather than replacing them.
 - The project is an independent open-source derivative. It targets compatibility with the Upstream Baseline chosen when development begins, but does not promise complete compatibility with later OpenMPT releases.
 - Preserve existing OpenMPT workflows and tracker identity; the new editor and AI collaboration are additive.
 - Tracker docs are Local Markdown. Default repository label is `triage`; this map uses the required `wayfinder:map` label.

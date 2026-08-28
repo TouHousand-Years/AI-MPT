@@ -35,6 +35,8 @@ Application and Sidecar share the product version. IPC, capability, and data con
 
 One Release Unit contains the main application, MCP Sidecar, required architecture helpers and Plugin Bridges, redistributable runtime components, default resources, protocol metadata, notices, and concise MCP setup documentation. These components are version-locked and released, installed, upgraded, and removed as one unit; users are not expected or supported to assemble or independently replace them.
 
+**Plugin Bridge/helper binaries, portable archive construction, common packaged resources, and upstream license/notice collection reuse the original OpenMPT implementation and package layout as their starting point.** The project adapts that implementation for the independent product identity and adds the Sidecar, schemas, runtime metadata, version-lock checks, and new dependency notices. Original OpenMPT's administrator-required install policy and automatic-update behavior are not inherited.
+
 Each preview publishes three corresponding artifacts from the same fixed source:
 
 - a per-user Windows installer that requires no administrator rights and supports unattended install, upgrade, and uninstall;
@@ -57,6 +59,8 @@ The product ID, release channel, protocol major, and installation-instance ident
 
 The installed application stores machine-local state below a current-user Local App Data product namespace, divided into configuration, logs, cache, runtime registration, and temporary resources. It never treats a module's directory as an implicit metadata store. Portable Mode uses a visible `UserData` directory beside the portable program while continuing to use a protected current-user runtime or temporary directory for security- and lifecycle-sensitive IPC and render resources. A read-only portable location produces an explicit error or documented no-persistence mode; it never silently switches to installed-mode storage.
 
+**Portable-mode detection, install-relative path handling, and portable configuration primitives reuse the original OpenMPT implementation where they satisfy this boundary.** The independent product namespace, visible `UserData` layout, protected runtime directory, read-only behavior, and separation of configuration/log/cache/runtime data are downstream adaptations.
+
 Settings, plugin paths, logs, caches, runtime records, update preferences, and MCP configuration never cross Windows-user boundaries. Runtime records and incomplete renders are removed on normal completion and swept after abandonment; caches and logs are bounded and safely clearable. Diagnostics retain issue 06's content-minimizing rules. Exact sizes and retention periods are implementation-tested limits, not part of this distribution decision.
 
 Modules, automatic saves, backups, and explicit exports are user data rather than cache. Uninstall retains them by default and never touches original OpenMPT data or another installation instance. A removal option distinguishes disposable cache/log/runtime data, opt-in settings removal, and protected automatic saves/backups/exports. The latter remain preserved unless the user separately and unmistakably selects them.
@@ -68,6 +72,8 @@ Temporary Context Packages, Audio Previews, Reviewer opinions, unhanded-off cand
 ### Module compatibility and upstream intake
 
 The project initially promises compatibility with the formats and behavior of Upstream Baseline `r25644`, not with every later OpenMPT release. Opening a module must not mutate it. For data that remains representable in the target format, Tracker, Piano Roll, and AI edits preserve baseline read, playback, save, reopen, and interoperability behavior. The first release writes no project-private MPTM chunk or other module extension.
+
+**Module loading, playback, format validation, saving, compatibility conversion, and offline rendering reuse the original OpenMPT implementation from the pinned baseline.** New Piano Roll and AI paths must invoke those implementations through the shared capability boundary rather than introducing independent format or playback engines.
 
 When a target format cannot express current data or save would make an irreversible conversion, direct overwrite is blocked by default. The user receives a concrete loss report and explicitly chooses Save As, a different target format, or confirmed conversion. A generic warning is insufficient.
 

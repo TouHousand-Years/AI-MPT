@@ -98,9 +98,10 @@ This section is a downstream recommendation inferred from the source inventory, 
 
 **Reuse behind adapters:**
 
-- `CSoundFile` and its containers remain the canonical model and playback implementation.
-- Pure model validation, format specifications, pattern/sample/instrument algorithms and serializers can be called behind typed adapters.
-- Existing undo buffers can initially back narrowly scoped commands that touch exactly one supported domain, provided the adapter owns prepare/mutate/failure cleanup/notification.
+- **Canonical Tracker model and playback reuse the original OpenMPT implementation:** `CSoundFile` and its Pattern, Order, Sample, Instrument, Plugin, and playback containers remain authoritative rather than being reimplemented for the Piano Roll or AI layer.
+- **Format validation, loaders/writers, serializers, and existing Pattern/Sample/Instrument edit algorithms reuse the original OpenMPT implementation** behind typed adapters.
+- **Domain-local undo and redo reuse the original OpenMPT implementation:** the existing Pattern, Sample, and Instrument undo buffers initially back narrowly scoped commands that touch exactly one supported domain, provided the adapter owns prepare/mutate/failure cleanup/notification. A new transaction coordinator is still required for cross-domain atomicity.
+- **Offline playback rendering and stream encoding reuse the original OpenMPT implementation** once the existing dialog-driven workflow is isolated behind a cancellable, snapshot-bound adapter.
 - `UpdateHint` can remain the internal bridge to legacy views, emitted once after a successful shared command.
 
 **Safe first shared queries:**

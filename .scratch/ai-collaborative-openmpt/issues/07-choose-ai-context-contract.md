@@ -24,6 +24,8 @@ A **Context Package** is the only complete Score Context delivery unit. It binds
 - one AI-oriented Piano Roll rendering;
 - one Mini Audio Reviewer opinion produced from the Score Context, Audio Preview, and Piano Roll.
 
+**Audio playback, offline mixing/rendering, and stream encoding reuse the original OpenMPT implementation.** The project extracts those functions from the existing UI workflow behind a bounded, cancellable, snapshot-bound adapter. Context Package identity, range/revision binding, resource handles, caching, provenance, Piano Roll rendering, and Reviewer orchestration are new downstream functionality.
+
 The four required components are all-or-nothing. Package creation is an asynchronous job: its initial result is only a job identifier and status, not a usable Score Context or partial Package. The final job either publishes a complete Package or fails. A render, image, reviewer, network, deadline, authorization, or resource failure never degrades into a Score Context-only success. Piano Roll generation is mandatory for the Reviewer; a visible application-level preference with an optional per-project override controls only whether the image is also exposed to the Main Agent.
 
 Lightweight queries for project identity, revision, structure navigation, format limits, available-sound summaries, and resource status do not create a Context Package and therefore do not invoke rendering or an external model. Context acquisition is layered:
