@@ -32,10 +32,12 @@ An implementation-ready product and architecture specification for an independen
 - [AI Score Context and multimodal evidence contract](issues/07-choose-ai-context-contract.md): assemble one immutable, range- and revision-bound Context Package from lossless semantic Score Context, bounded full-mix audio, an AI-oriented Piano Roll, and an authorized text-image-audio Reviewer opinion; publish it only when every required component succeeds.
 - [Reviewable AI change workflow](issues/08-prototype-reviewable-change-workflow.md): partition an immutable revision-bound Change Proposal into semantically indivisible Review Units, compare the complete proposal and accepted subset consistently in Tracker and Piano Roll, bind audition and high-impact confirmation to that exact subset, and apply it atomically as one revision and undo step.
 - [Independent project distribution](issues/09-choose-project-distribution-model.md): ship an independently named BSD-3-Clause derivative as one version-locked application/Sidecar Release Unit, initially through unsigned x64 Windows installer, portable, and source Developer Preview artifacts on GitHub, with strict user-data and baseline-module compatibility boundaries.
+- [Piano Roll workspace state and synchronization](issues/10-define-piano-roll-workspace-state.md): extend the native Pattern view and its state lifecycle; retain `PatternRect`, MultiView, Follow Song, and existing settings infrastructure while adding synchronized Piano Roll layout, viewport, filter, lane, and focus state without module metadata.
+- [Initial independent product identity](issues/11-choose-independent-product-identity.md): use `OpenMPT for AI` and `OpenMPT-for-AI` only as provisional working/repository names, centralize the `OpenMPTForAI` engineering prefix and isolate its user data, provide minimal independent-derivative attribution, and defer final branding and open-source publication concerns until the owner is satisfied with a releasable version.
 
 ## Implementation path
 
-- [Choose the independent product identity](issues/11-choose-independent-product-identity.md).
+- [Prototype the Piano Roll Focus subordinate Tracker UI](issues/19-prototype-piano-roll-focus-subordinate-tracker.md).
 - [Bootstrap the pinned upstream source tree](issues/12-bootstrap-upstream-source-tree.md).
 - [Establish the reproducible build and CI baseline](issues/13-establish-reproducible-build-ci.md).
 - [Package the installer, portable application, and MCP Sidecar](issues/14-package-installer-portable-sidecar.md).
@@ -51,7 +53,7 @@ An implementation-ready product and architecture specification for an independen
 - Plugin, sample, filesystem, and export security rules for capabilities that cross the project boundary.
 - App-side broker and sidecar implementation against the issue 06 thread, transaction, event, cancellation, discovery, and bounded-resource contract.
 - IPC integration, MCP conformance, load, and fault-injection verification; tracker/piano-roll equivalence, file compatibility, and musical-regression coverage also remain to be implemented.
-- The implementation work tracked in issues 11 through 18, including formal identity, source bootstrap, build/CI, packaging, licensing, compatibility evidence, preview publication, and post-preview hardening.
+- The implementation work tracked in issues 12 through 19, including the Focus-layout UI prototype, source bootstrap, build/CI, packaging, licensing, compatibility evidence, preview publication, and post-preview hardening. Issue 11 supplies only the provisional engineering identity; final public branding and open-source publication concerns remain inactive until the owner is satisfied with a releasable version.
 - Whether later phases should model tracker-specific playback semantics such as NNA, note delay, retrigger, and inferred note duration more deeply in the Piano Roll.
 
 ## Out of scope
