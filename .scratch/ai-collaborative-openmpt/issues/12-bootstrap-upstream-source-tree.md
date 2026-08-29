@@ -2,7 +2,7 @@
 
 Parent: ../map.md
 Type: implementation
-Status: open
+Status: resolved
 Blocked by: 01, 09
 
 ## Question
@@ -71,7 +71,5 @@ selective upstream integration must be identifiable from one repository and
 one release tag.
 
 The Git history import and exact source-prefix installation are now complete.
-Issue 12 remains open only until the pinned `r25644` tree is compared with a
-clean canonical SVN export and the resulting manifest evidence is recorded.
 The exact procedure and current limitations are recorded in
 [`UPSTREAM.md`](../../../UPSTREAM.md).
