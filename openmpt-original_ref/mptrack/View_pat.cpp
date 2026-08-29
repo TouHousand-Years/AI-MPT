@@ -141,6 +141,81 @@ END_MESSAGE_MAP()
 
 static_assert(ModCommand::maxColumnValue <= 999, "Command range for ID_CHANGE_PCNOTE_PARAM is designed for 999");
 
+
+// PROTOTYPE (Issue 22): A dedicated child window keeps the Piano Roll out of
+// the Tracker's paint and scroll surface. It is intentionally local to the
+// Pattern view and can be discarded when the production editor seam is built.
+class CPianoRollPrototypePane final : public CWnd
+{
+public:
+	explicit CPianoRollPrototypePane(CViewPattern &owner)
+		: m_owner(owner) {}
+
+	bool Create()
+	{
+		const CString windowClass = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(nullptr, IDC_ARROW), nullptr, nullptr);
+		return CreateEx(0, windowClass, _T("Piano Roll Prototype"), WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+			CRect{}, &m_owner, 0) != FALSE;
+	}
+
+protected:
+	CViewPattern &m_owner;
+
+	afx_msg BOOL OnEraseBkgnd(CDC *) { return TRUE; }
+
+	afx_msg void OnPaint()
+	{
+		CPaintDC paintDC(this);
+		CRect client;
+		GetClientRect(&client);
+		if(client.IsRectEmpty())
+			return;
+
+		// Paint the complete pane into a private bitmap and present it with one
+		// BitBlt. Playback notifications may arrive many times per second, so
+		// drawing GDI primitives directly to the screen visibly flashed.
+		CDC bufferDC;
+		CBitmap bufferBitmap;
+		bufferDC.CreateCompatibleDC(&paintDC);
+		bufferBitmap.CreateCompatibleBitmap(&paintDC, client.Width(), client.Height());
+		CBitmap *oldBitmap = bufferDC.SelectObject(&bufferBitmap);
+		const CRect pane = m_owner.GetPianoRollPrototypeRect();
+		const CPoint oldOrigin = bufferDC.SetViewportOrg(-pane.left, -pane.top);
+		m_owner.DrawPianoRollPrototype(bufferDC);
+		bufferDC.SetViewportOrg(oldOrigin);
+		paintDC.BitBlt(0, 0, client.Width(), client.Height(), &bufferDC, 0, 0, SRCCOPY);
+		bufferDC.SelectObject(oldBitmap);
+	}
+
+	CPoint ToOwnerPoint(CPoint point)
+	{
+		ClientToScreen(&point);
+		m_owner.ScreenToClient(&point);
+		return point;
+	}
+
+	afx_msg void OnLButtonDown(UINT flags, CPoint point)
+	{
+		m_owner.HandlePianoRollPrototypeLButtonDown(flags, ToOwnerPoint(point));
+	}
+
+	afx_msg void OnLButtonDblClk(UINT flags, CPoint point)
+	{
+		const CPoint ownerPoint = ToOwnerPoint(point);
+		m_owner.SendMessage(WM_LBUTTONDBLCLK, flags, MAKELPARAM(ownerPoint.x, ownerPoint.y));
+	}
+
+	DECLARE_MESSAGE_MAP()
+};
+
+
+BEGIN_MESSAGE_MAP(CPianoRollPrototypePane, CWnd)
+	ON_WM_ERASEBKGND()
+	ON_WM_PAINT()
+	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONDBLCLK()
+END_MESSAGE_MAP()
+
 const CSoundFile *CViewPattern::GetSoundFile() const { return (GetDocument() != nullptr) ? &GetDocument()->GetSoundFile() : nullptr; };
 CSoundFile *CViewPattern::GetSoundFile() { return (GetDocument() != nullptr) ? &GetDocument()->GetSoundFile() : nullptr; };
 
@@ -155,6 +230,7 @@ CViewPattern::CViewPattern()
 	m_Dib.Init(CMainFrame::bmpNotes);
 	UpdateColors();
 	m_octaveKeyMemory.fill(NOTE_NONE);
+	m_pianoRollPrototypeStatus = _T("Select a native note, then drag it or use -1 / +1.");
 }
 
 
@@ -170,6 +246,10 @@ CViewPattern::~CViewPattern()
 void CViewPattern::OnInitialUpdate()
 {
 	CModScrollView::OnInitialUpdate();
+	ModifyStyle(0, WS_CLIPCHILDREN);
+	auto pianoRollPane = std::make_unique<CPianoRollPrototypePane>(*this);
+	if(pianoRollPane->Create())
+		m_pianoRollPrototypePane = std::move(pianoRollPane);
 	EnableToolTips();
 	m_chnState.assign(GetDocument()->GetNumChannels(), {});
 	m_splitActiveNoteChannel.fill(NOTE_CHANNEL_MAP_INVALID);
@@ -196,6 +276,7 @@ void CViewPattern::OnInitialUpdate()
 	m_prevChordNote = NOTE_NONE;
 
 	m_visibleColumns.set();
+	UpdatePianoRollPrototypePaneLayout();
 	CModDoc *modDoc = GetDocument();
 	if(modDoc->GetSoundFile().m_SongFlags[SONG_FORMAT_NO_VOLCOL] && TrackerSettings::Instance().autoHideVolumeColumnForMOD)
 		m_visibleColumns.reset(PatternCursor::volumeColumn);
@@ -780,6 +861,8 @@ void CViewPattern::OnDestroy()
 		delete m_pEditWnd;
 		m_pEditWnd = NULL;
 	}
+	if(m_pianoRollPrototypePane && m_pianoRollPrototypePane->GetSafeHwnd())
+		m_pianoRollPrototypePane->DestroyWindow();
 
 	CModScrollView::OnDestroy();
 }
@@ -1138,6 +1221,8 @@ void CViewPattern::OnLButtonDown(UINT nFlags, CPoint point)
 	const auto *modDoc = GetDocument();
 	if(modDoc == nullptr)
 		return;
+	if(HandlePianoRollPrototypeLButtonDown(nFlags, point))
+		return;
 	const auto &sndFile = modDoc->GetSoundFile();
 
 	SetFocus();
@@ -1230,6 +1315,13 @@ void CViewPattern::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CViewPattern::OnLButtonDblClk(UINT uFlags, CPoint point)
 {
+	if(GetPianoRollPrototypeRect().PtInRect(point))
+	{
+		HandlePianoRollPrototypeLButtonDown(uFlags, point);
+		if(GetCursorCommand().IsNote())
+			PreviewNote(GetCurrentRow(), GetCurrentChannel());
+		return;
+	}
 	PatternCursor cursor = GetPositionFromPoint(point);
 	if(cursor == m_Cursor && point.y >= m_szHeader.cy)
 	{
@@ -1252,6 +1344,10 @@ void CViewPattern::OnLButtonDblClk(UINT uFlags, CPoint point)
 
 void CViewPattern::OnLButtonUp(UINT nFlags, CPoint point)
 {
+	if(FinishPianoRollPrototypeDrag(point))
+		return;
+	if(GetPianoRollPrototypeRect().PtInRect(point))
+		return;
 	CModDoc *modDoc = GetDocument();
 	if(modDoc == nullptr)
 		return;
@@ -1623,6 +1719,10 @@ void CViewPattern::OnXButtonUp(UINT nFlags, UINT nButton, CPoint point)
 
 void CViewPattern::OnMouseMove(UINT nFlags, CPoint point)
 {
+	if(UpdatePianoRollPrototypeDrag(point))
+		return;
+	if(GetPianoRollPrototypeRect().PtInRect(point))
+		return;
 	CModScrollView::OnMouseMove(nFlags, point);
 
 	const bool isDraggingRecordGroup = IsDraggingRecordGroup();
@@ -3709,8 +3809,25 @@ LRESULT CViewPattern::OnPlayerNotify(Notification *pnotify)
 	}
 
 	UpdateIndicator(false);
+	InvalidatePianoRollPrototype();
 
 	return 0;
+}
+
+
+void CViewPattern::UpdatePianoRollPrototypePaneLayout()
+{
+	if(!m_pianoRollPrototypePane || !m_pianoRollPrototypePane->GetSafeHwnd())
+		return;
+	const CRect pane = GetPianoRollPrototypeRect();
+	if(pane.IsRectEmpty())
+	{
+		m_pianoRollPrototypePane->ShowWindow(SW_HIDE);
+		return;
+	}
+	m_pianoRollPrototypePane->MoveWindow(pane, FALSE);
+	m_pianoRollPrototypePane->ShowWindow(SW_SHOWNA);
+	m_pianoRollPrototypePane->Invalidate(FALSE);
 }
 
 CHANNELINDEX CViewPattern::GetRecordChannelForPCEvent(PLUGINDEX plugSlot, PlugParamIndex paramIndex) const
