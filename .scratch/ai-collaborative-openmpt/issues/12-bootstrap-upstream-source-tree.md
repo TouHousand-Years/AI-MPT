@@ -1,7 +1,7 @@
 # Bootstrap the pinned upstream source tree
 
 Parent: ../map.md
-Type: implementation
+Type: task
 Status: resolved
 Blocked by: 01, 09
 
@@ -10,6 +10,14 @@ Blocked by: 01, 09
 How should the complete OpenMPT history at canonical SVN `r25644` be imported and verified, permanently tagged, documented in `UPSTREAM.md`, and turned into the monorepo base for the independent application's first downstream code?
 
 ## Comments
+
+### Scope correction — 2026-08-29
+
+The imported source now serves as a Starting Snapshot, not a compatibility
+baseline. The existing Git tree is sufficient to begin local development. The
+canonical SVN export comparison described below was not run and is no longer a
+closure gate; reproducing OpenMPT's exact development environment and proving
+byte-for-byte `r25644` fidelity are outside the current destination.
 
 ### Repository topology decision — 2026-08-29
 
@@ -70,6 +78,9 @@ project because the Release Unit, source distribution, provenance, and future
 selective upstream integration must be identifiable from one repository and
 one release tag.
 
-The Git history import and exact source-prefix installation are now complete.
-The exact procedure and current limitations are recorded in
-[`UPSTREAM.md`](../../../UPSTREAM.md).
+The Git history import and exact source-prefix installation are complete and
+more than sufficient for the current personal-use effort. The checked-in tree
+under `openmpt-original_ref/` is the development starting point. Its provenance
+and the unperformed canonical SVN comparison are recorded in
+[`UPSTREAM.md`](../../../UPSTREAM.md); that comparison is reference-only and
+does not block subsequent work.

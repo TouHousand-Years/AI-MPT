@@ -1,22 +1,23 @@
-# AI-Collaborative OpenMPT: implementation-ready direction
+# OpenMPT for AI: path to a personally useful vertical slice
 
 Label: wayfinder:map
 Status: open
 
 ## Destination
 
-An implementation-ready product and architecture specification for an independent OpenMPT-derived tracker that adds a synchronized piano-roll editing view and exposes broad, reviewable composition capabilities plus symbolic, optional visual, and audio-reviewed context through MCP.
+A clear implementation path to a locally useful personal OpenMPT derivative in which the owner can edit Tracker Pattern data through a synchronized Piano Roll and let a local AI inspect the music and propose reviewable, undoable changes. Success is one end-to-end workflow on the owner's current development machine, not public-release readiness, reproducible distribution, or fidelity to a pinned upstream revision.
 
 ## Notes
 
 - Domain: Windows desktop music tracker, C++/MFC OpenMPT codebase, local MCP integration, human-in-the-loop AI composition.
 - Consult `grilling`, `domain-modeling`, `research`, and `prototype` as indicated by each ticket.
-- The Piano Roll is primarily a human editor and edits the existing Tracker Pattern model. Score Context remains the canonical AI representation; every Context Package also contains an AI-oriented Piano Roll for the Mini Audio Reviewer, while a user preference controls whether the Main Agent sees it.
-- AI changes are proposal-first, revision-bound, atomic, auditable, and undoable. Read-only analysis, preview generation, and transport controls may use a lower approval tier.
-- AI audition uses bounded offline rendering for a Mini Audio Reviewer, whose natural-language opinion can accompany Score Context; the Main Agent does not require native audio input in the first release.
-- Prefer a local MCP sidecar and a shared Application Capability layer over GUI automation or embedding AI protocol handling in the audio/UI core.
-- **Reuse the original OpenMPT implementation** for the canonical Tracker model and event semantics, format validation and I/O, existing Pattern edit algorithms, domain-local undo/redo, playback and offline rendering, Plugin Bridge/helpers, portable-mode primitives, and upstream package/license materials. New Piano Roll, Application Capability, AI/MCP, transaction, review, and independent-distribution code wraps or adapts those implementations rather than replacing them.
-- The project is an independent open-source derivative. It targets compatibility with the Upstream Baseline chosen when development begins, but does not promise complete compatibility with later OpenMPT releases.
+- The Piano Roll is primarily a human editor and edits the existing Tracker Pattern model. Score Context remains the canonical AI representation.
+- AI writes retain document-revision checks, deliberate human apply, atomic mutation, and ordinary undo as product-safety principles. The first slice does not have to implement the complete lease, receipt, partial-acceptance, impact-tier, or mandatory-audition machinery already designed for a mature system.
+- Prefer a local MCP sidecar and a narrow Application Capability seam over GUI automation or embedding AI protocol handling in the audio/UI core. Expose only the capabilities required by the current vertical slice; do not build a complete facade in advance.
+- **Reuse the existing OpenMPT implementation where it lowers effort**: Tracker data and event semantics, Pattern editing, format I/O, undo/redo, playback, and offline rendering are starting materials rather than behavior that must remain byte-for-byte compatible.
+- The `r25644` source under `openmpt-original_ref/` is the project's **Starting Snapshot**. It is not an active compatibility target, a reason to duplicate OpenMPT's development environment, or a requirement for continued upstream synchronization and exact SVN verification.
+- Build and debug the smallest useful x64 configuration on the owner's current machine. Toolchain pinning, clean-runner reproducibility, CI matrices, installers, portable packaging, and public release work are deferred.
+- Audio review, the Piano Roll Focus layout, broader Order/Plugin capabilities, and hardening graduate only after the basic Piano Roll-to-AI loop reveals that they are the next useful decision.
 - Preserve existing OpenMPT workflows and tracker identity; the new editor and AI collaboration are additive.
 - Tracker docs are Local Markdown. Default repository label is `triage`; this map uses the required `wayfinder:map` label.
 
@@ -24,42 +25,35 @@ An implementation-ready product and architecture specification for an independen
 
 <!-- Resolved child-ticket pointers are appended here. -->
 - [Score Context representation](issues/04-research-symbolic-score-context.md): use revision-bound sparse OpenMPT semantic JSON as canonical; clipboard text is a compact projection, while MIDI and MusicXML are explicitly lossy derived views.
-- [Upstream Baseline and source workflow](issues/01-pin-upstream-baseline.md): pin canonical SVN `r25644` (GitHub mirror locator `0eafb124...`), preserve full imported history/licenses, and selectively sync by SVN revision on tested integration branches.
+- [Upstream Baseline and source workflow](issues/01-pin-upstream-baseline.md): `r25644` identifies the imported source's provenance, but the current effort treats it only as a Starting Snapshot; exact verification, compatibility guarantees, and selective-sync governance are inactive.
 - [Piano Roll projection and editing semantics](issues/03-prototype-piano-roll-semantics.md): use a synchronized Tracker/Piano Roll split as the default, with a focus layout that narrows and simplifies Tracker context to expand the time-horizontal Piano Roll; both remain projections of the same tracker data and undo/revision state.
-- [OpenMPT capability inventory](issues/02-inventory-application-capabilities.md): place a new typed facade above `CModDoc` / `CSoundFile`; legacy operations migrate only after they gain immutable queries, revision checks, atomic undo, thread ownership, and post-commit events.
-- [Shared Application Capability boundary](issues/05-define-shared-capability-boundary.md): expose a closed-loop composition surface through base, Pattern, Order, and audition modes with focused Skills; AI edits may span modes atomically, offline listening is delegated to a non-editing Mini Audio Reviewer, and human writes are frozen only during a visible Agent Edit Session.
-- [Local MCP sidecar IPC and lifecycle](issues/06-choose-sidecar-ipc-lifecycle.md): use one client-supervised stateless sidecar over stdio and one same-user named-pipe endpoint per app process, with explicit document attachment, owning-thread capability dispatch, revision/event resynchronization, exclusive expiring write leases, atomic cancellable requests, operation receipts, bounded offline resources, and authoritative UI cancellation.
-- [AI Score Context and multimodal evidence contract](issues/07-choose-ai-context-contract.md): assemble one immutable, range- and revision-bound Context Package from lossless semantic Score Context, bounded full-mix audio, an AI-oriented Piano Roll, and an authorized text-image-audio Reviewer opinion; publish it only when every required component succeeds.
-- [Reviewable AI change workflow](issues/08-prototype-reviewable-change-workflow.md): partition an immutable revision-bound Change Proposal into semantically indivisible Review Units, compare the complete proposal and accepted subset consistently in Tracker and Piano Roll, bind audition and high-impact confirmation to that exact subset, and apply it atomically as one revision and undo step.
-- [Independent project distribution](issues/09-choose-project-distribution-model.md): ship an independently named BSD-3-Clause derivative as one version-locked application/Sidecar Release Unit, initially through unsigned x64 Windows installer, portable, and source Developer Preview artifacts on GitHub, with strict user-data and baseline-module compatibility boundaries.
+- [OpenMPT capability inventory](issues/02-inventory-application-capabilities.md): use `CModDoc` / `CSoundFile` and existing domain operations as implementation material; wrap only the operations required by each vertical slice rather than treating the inventory as an application-wide migration plan.
+- [Shared Application Capability boundary](issues/05-define-shared-capability-boundary.md): keep a protocol-neutral seam above the OpenMPT document model, but introduce it capability-by-capability as the vertical slice requires rather than migrating the whole application first.
+- [Local MCP sidecar IPC and lifecycle](issues/06-choose-sidecar-ipc-lifecycle.md): retain the client-supervised local sidecar direction; multi-instance discovery, leases, receipts, and comprehensive fault handling are mature-system constraints, not first-slice gates.
+- [AI Score Context and multimodal evidence contract](issues/07-choose-ai-context-contract.md): keep revision-bound semantic Score Context authoritative; audio, Piano Roll evidence, and Mini Audio Reviewer output are deferred enrichments rather than prerequisites for the first AI read loop.
+- [Reviewable AI change workflow](issues/08-prototype-reviewable-change-workflow.md): retain proposal-first review, exact document revision, atomic apply, human confirmation, and undo; partial acceptance, mandatory audition, and high-impact tiers may follow observed need.
 - [Piano Roll workspace state and synchronization](issues/10-define-piano-roll-workspace-state.md): extend the native Pattern view and its state lifecycle; retain `PatternRect`, MultiView, Follow Song, and existing settings infrastructure while adding synchronized Piano Roll layout, viewport, filter, lane, and focus state without module metadata.
 - [Initial independent product identity](issues/11-choose-independent-product-identity.md): use `OpenMPT for AI` and `OpenMPT-for-AI` only as provisional working/repository names, centralize the `OpenMPTForAI` engineering prefix and isolate its user data, provide minimal independent-derivative attribution, and defer final branding and open-source publication concerns until the owner is satisfied with a releasable version.
-
-## Implementation path
-
-- [Prototype the Piano Roll Focus subordinate Tracker UI](issues/19-prototype-piano-roll-focus-subordinate-tracker.md).
-- [Bootstrap the pinned upstream source tree](issues/12-bootstrap-upstream-source-tree.md).
-- [Establish the reproducible build and CI baseline](issues/13-establish-reproducible-build-ci.md).
-- [Package the installer, portable application, and MCP Sidecar](issues/14-package-installer-portable-sidecar.md).
-- [Audit release licenses and source distribution](issues/15-audit-release-licenses-source.md).
-- [Verify compatibility and distribution lifecycle](issues/16-verify-distribution-compatibility-lifecycle.md).
-- [Publish the first Developer Preview](issues/17-publish-developer-preview.md).
-- [Harden post-preview distribution and maintenance](issues/18-harden-post-preview-distribution.md).
+- [Available OpenMPT starting source](issues/12-bootstrap-upstream-source-tree.md): the imported Git tree under `openmpt-original_ref/` is sufficient to begin local development; the unperformed canonical SVN export comparison is no longer a closure gate.
 
 ## Not yet specified
 
-- Exact code seams and module boundaries for the shared Application Capability layer after the Upstream Baseline and capability inventory are known.
-- Complete MCP resource and tool catalogue and concrete payload schemas beyond the protocol/lifecycle policy in issue 06 and the context-specific sub-contract in issue 07.
-- Plugin, sample, filesystem, and export security rules for capabilities that cross the project boundary.
-- App-side broker and sidecar implementation against the issue 06 thread, transaction, event, cancellation, discovery, and bounded-resource contract.
-- IPC integration, MCP conformance, load, and fault-injection verification; tracker/piano-roll equivalence, file compatibility, and musical-regression coverage also remain to be implemented.
-- The implementation work tracked in issues 12 through 19, including the Focus-layout UI prototype, source bootstrap, build/CI, packaging, licensing, compatibility evidence, preview publication, and post-preview hardening. Issue 11 supplies only the provisional engineering identity; final public branding and open-source publication concerns remain inactive until the owner is satisfied with a releasable version.
+- Which additional Pattern, Order, instrument, sample, plugin, filesystem, and export capabilities become useful after the first bounded Pattern workflow.
+- Whether real use justifies partial Review Unit acceptance, mandatory audition, impact tiers, write leases, Operation Receipts, multi-instance routing, or broader fault-injection work.
+- Whether audio review should become part of the ordinary AI loop, remain an optional enrichment, or be omitted.
 - Whether later phases should model tracker-specific playback semantics such as NNA, note delay, retrigger, and inferred note duration more deeply in the Piano Roll.
 
 ## Out of scope
 
 - Replacing the tracker editor or changing OpenMPT's fundamental tracker-oriented product identity.
-- Guaranteeing compatibility with every future OpenMPT release or continuously mirroring upstream development.
+- Treating `r25644` as a strict compatibility target; exact SVN-export verification; reproducing the original OpenMPT development environment; or continuously mirroring upstream development.
+- [Independent project distribution](issues/09-choose-project-distribution-model.md): public-product packaging and release governance are deferred until the owner explicitly chooses to publish.
+- [Reproducible build and CI baseline](issues/13-establish-reproducible-build-ci.md): pinned build matrices, clean-runner reproducibility, and CI are not required for the personal-use vertical slice.
+- [Installer, portable application, and Sidecar packaging](issues/14-package-installer-portable-sidecar.md): installer and portable Release Unit work are deferred.
+- [Release license and source-distribution audit](issues/15-audit-release-licenses-source.md): publication-grade artifact inventory, notice generation, and source archives are deferred; existing upstream notices must still be preserved.
+- [Distribution compatibility and lifecycle verification](issues/16-verify-distribution-compatibility-lifecycle.md): baseline corpora and install/upgrade/uninstall matrices are deferred; touched workflows still require proportionate local verification and user-data safety.
+- [First Developer Preview publication](issues/17-publish-developer-preview.md): no public preview is part of the current destination.
+- [Post-preview distribution and maintenance hardening](issues/18-harden-post-preview-distribution.md): signing, SBOMs, provenance, update channels, vulnerability processes, and baseline-uplift policy belong to a future publication map.
 - Treating a Piano Roll rendering or Reviewer opinion as canonical musical truth; both remain evidence accompanying the authoritative Score Context.
 - Cloud-hosted multi-user collaboration or a remote MCP service in the initial direction.
 - Unreviewed arbitrary filesystem, process, or network access by AI tools.

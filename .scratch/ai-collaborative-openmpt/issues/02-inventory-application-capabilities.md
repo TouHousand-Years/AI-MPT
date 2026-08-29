@@ -11,6 +11,13 @@ For the pinned Upstream Baseline, what user-visible OpenMPT capabilities exist, 
 
 ## Comments
 
+### Implementation scope correction — 2026-08-29
+
+This inventory remains useful evidence about the Starting Snapshot, but it is
+not a migration checklist. The current map wraps only the existing operations
+needed by the first vertical slice; other capability groups remain untouched
+until an observed workflow requires them.
+
 ## Answer
 
 ### Baseline and method

@@ -11,6 +11,15 @@ How should a human request, inspect, audition, partially accept, reject, apply, 
 
 ## Comments
 
+### Implementation scope correction — 2026-08-29
+
+The first write loop retains the safety core: an explicit proposal bound to the
+expected document revision, deliberate human apply, atomic mutation, and an
+ordinary undo step. Partial Review Unit acceptance, mandatory matching audition,
+impact tiers, long-lived audit evidence, and comprehensive stale/failure flows
+are mature-system refinements rather than prerequisites for the first useful
+slice.
+
 ### Logic prototype ready for human review — 2026-08-28
 
 - Review-time working asset, now retained only on the evidence branch: `.scratch/ai-collaborative-openmpt/prototypes/reviewable-change-workflow-logic-prototype.html`.

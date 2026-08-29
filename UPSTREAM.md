@@ -1,15 +1,16 @@
-# Upstream Baseline
+# OpenMPT Starting Snapshot
 
 Label: triage
-Status: pending-verification
+Status: reference-only
 
-This file records the provenance boundary for the OpenMPT-derived project. It is
-not a substitute for importing the upstream history or for the byte-for-byte
-verification described below.
+This file records where the checked-in OpenMPT source came from and what
+historical import work was performed. The source is now a Starting Snapshot for
+personal-use development, not an active compatibility target or a byte-for-byte
+verification commitment.
 
-## Canonical baseline
+## Recorded source identity
 
-The project baseline is the following fixed OpenMPT source revision:
+The imported source was taken from the following OpenMPT revision:
 
 ```text
 SVN URL:       https://source.openmpt.org/svn/openmpt/trunk/OpenMPT/
@@ -18,9 +19,9 @@ Git locator:   0eafb124cfd15f94e32302734607e71f2c36c84f
 Observed:      2026-08-26
 ```
 
-The SVN URL and revision are authoritative. The Git SHA is an immutable
-locator in the OpenMPT GitHub mirror as observed on the date above; it is not a
-replacement for the canonical SVN identity.
+The SVN URL/revision and observed Git locator identify provenance. They do not
+require the downstream project to preserve this revision's behavior, build
+environment, file handling, or future compatibility.
 
 The official mirror commit records the same SVN revision in its
 `git-svn-id` metadata:
@@ -29,11 +30,9 @@ The official mirror commit records the same SVN revision in its
 
 ## Repository topology
 
-The independent application and its imported upstream history belong to one
-project Git repository. This is a project-release decision, not a requirement
-that the upstream project use the same repository. The official OpenMPT GitHub
-mirror and SVN repository remain read-only upstream sources, configured as an
-upstream remote when the import is performed.
+The independent application and its imported upstream history currently live in
+one project Git repository. The official OpenMPT GitHub mirror and SVN
+repository remain read-only reference sources.
 
 The imported upstream source uses the existing provenance prefix:
 
@@ -41,23 +40,22 @@ The imported upstream source uses the existing provenance prefix:
 openmpt-original_ref/
 ```
 
-The final import must preserve the complete reachable upstream history rather
-than adding only a source snapshot. The permanent annotated tag is:
+The completed historical import retained reachable upstream history and created
+this annotated tag:
 
 ```text
 upstream/openmpt-svn-r25644
 ```
 
-The project must not use a floating submodule, a nested `.git` directory, or a
-separate source repository as the release's authoritative source. A temporary
-clone may be used to acquire and inspect upstream history, but the release
-repository must retain the imported ancestry and all downstream changes.
+These topology choices describe work already done. They are not continuing
+release gates or a requirement that future development preserve exact upstream
+ancestry.
 
 ## Current repository audit
 
 The original snapshot is evidence for the import. The source prefix was
-corrected from the pinned Git tree on 2026-08-29; the remaining verification
-gate is the canonical SVN export comparison.
+corrected from the recorded Git tree on 2026-08-29. A canonical SVN export
+comparison was not performed and is no longer required for the current effort.
 
 | Item | Current value | Interpretation |
 | --- | --- | --- |
@@ -75,7 +73,7 @@ gate is the canonical SVN export comparison.
 | Upstream history | Imported into Git object database | 17,432 commits and 185,790 reachable object IDs checked; 0 missing objects. |
 | Project tag | Created | `upstream/openmpt-svn-r25644` points to the official r25644 commit and tree. |
 | Upstream remote | Configured read-only | `openmpt-upstream` fetches from GitHub; its push URL is `DISABLED`. |
-| Exact SVN comparison | Not run | `svn` and `svnversion` are unavailable in the current environment. |
+| Exact SVN comparison | Not run | Reference-only missing evidence; it does not block personal-use development. |
 
 The snapshot reports OpenMPT version `1.33.00.25`, and
 `soundlib/SampleFormats.cpp` contains the three type-explicit `std::clamp`
@@ -102,37 +100,20 @@ with a target-scoped cleanup, and the prefix was repopulated with
 The current prefix contains all 7,539 baseline paths; no hand-copy or
 force-add was used.
 
-Any truly generated or VCS metadata excluded from a clean export must be
-identified separately in the verification manifest. Issue 13 may regenerate
-build outputs when its toolchain and build policy are implemented, but it must
-not redefine which tracked source files belong to the r25644 baseline.
+Generated build outputs may be created as needed by the local development loop.
+No manifest or exact baseline path-set proof is required by the current map.
 
-## Required bootstrap verification
+## Current scope status
 
-Issue 12 is complete only after all of the following are true:
-
-1. [x] A full-history checkout of the official mirror is obtained; the project
-   repository now retains 17,432 commits and 185,790 reachable object IDs with
-   no missing objects, and the pinned Git locator carries SVN revision
-   `r25644`.
-2. [x] The exact upstream Git tree is installed under the agreed source prefix
-   without squashing authorship or commit messages. The full history is
-   retained in this repository through the immutable baseline tag, and the
-   current `openmpt-original_ref/` tree matches its official baseline tree.
-3. [x] A permanent annotated tag named `upstream/openmpt-svn-r25644` identifies
-   the imported official baseline commit and tree.
-4. A clean `svn export -r 25644` from the canonical URL is compared with the
-   imported tree after documented VCS and generated-file exclusions.
-5. [ ] The comparison records the source path set, deterministic byte-manifest
-   hash, imported tree ID, Git locator, SVN URL/revision, export timestamp, and
-   result in this file. The Git-side manifest is already recorded by the
-   7,539-path tree and deterministic SHA-256
-   `ED8A7F57A29588A16D2F9F2CD424016309B8179A01BF6D1169ADFDBEC6D28106`; the
-   SVN export timestamp and comparison result remain pending.
-6. Downstream project commits remain distinguishable from upstream commits;
-   build and release verification continue in issues 13 and 15.
-
-Until the SVN export comparison and its manifest/result are complete, this
-document and issue 12 must remain open and must not claim a fully verified
-upstream baseline. The full-history Git import and exact Git-tree installation
-are complete.
+- The full-history Git import, annotated tag, and installation of the recorded
+  Git tree under `openmpt-original_ref/` are complete historical facts.
+- The canonical SVN export comparison and deterministic cross-system manifest
+  were not completed. They are deliberately abandoned as current gates.
+- Local development may change, remove, reorganize, or wrap the Starting
+  Snapshot wherever the personal-use vertical slice benefits.
+- Tests should protect the workflows and personal project data actually touched
+  by downstream changes; they do not have to prove general `r25644`
+  compatibility.
+- If public distribution, formal upstream intake, or a compatibility promise is
+  later desired, it requires a fresh decision map rather than reactivating the
+  historical checklist by default.

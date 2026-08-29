@@ -11,6 +11,14 @@ What canonical, revision-bound Score Context should the Main Agent receive for a
 
 ## Comments
 
+### Implementation scope correction — 2026-08-29
+
+Revision-bound semantic Score Context remains authoritative, but the first AI
+read loop does not require a complete all-or-nothing multimodal Context Package.
+Audio Preview, AI-oriented Piano Roll evidence, and the Mini Audio Reviewer are
+deferred enrichments whose value will be judged after the symbolic round trip
+works locally.
+
 The design was grilled in rounds and confirmed by the human collaborator on 2026-08-28. It turns the canonical representation chosen in issue 04 into a bounded context-assembly contract and supersedes issue 05 only where that issue described audition and Piano Roll evidence as request-dependent.
 
 ## Answer

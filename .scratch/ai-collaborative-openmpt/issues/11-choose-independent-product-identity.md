@@ -39,7 +39,7 @@ Executable names, package identifiers, file associations, installation namespace
 
 README, About, and other unavoidable product-information surfaces use a short source and independence statement:
 
-> This is an independent derivative of OpenMPT based on the project's pinned Upstream Baseline. It is not affiliated with, sponsored by, or endorsed by OpenMPT or its contributors.
+> This is an independent derivative of OpenMPT whose Starting Snapshot is recorded in `UPSTREAM.md`. It is not affiliated with, sponsored by, or endorsed by OpenMPT or its contributors.
 
 This is the minimum attribution decision for current engineering work. It does not attempt to settle a complete release notice, trademark clearance, or other open-source publication question.
 

@@ -11,6 +11,14 @@ How should the local MCP sidecar discover and connect to running project instanc
 
 ## Comments
 
+### Implementation scope correction — 2026-08-29
+
+The local, client-supervised Sidecar direction remains valid. For the first
+personal-use round trip, single-application and single-document operation may
+precede the complete multi-instance discovery, write-lease, Operation Receipt,
+resource-budget, and fault-recovery contract. Those mechanisms are added only
+when the prototype exposes the corresponding risk.
+
 The design was grilled in rounds and confirmed by the human collaborator on 2026-08-28. It refines the thread, revision, transaction, event, and Agent Edit Session invariants established by issue 05 without binding the Application Capability layer itself to MCP. Issue 08 later narrows the first-release proposal workflow so candidate operations remain private until one human-approved accepted subset is applied atomically.
 
 ## Answer

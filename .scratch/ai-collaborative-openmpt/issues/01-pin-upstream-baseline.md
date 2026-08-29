@@ -11,6 +11,17 @@ Which exact OpenMPT revision should become the Upstream Baseline, and what sourc
 
 ## Comments
 
+### Scope correction — 2026-08-29
+
+The owner no longer requires strict source-version governance, an exact match to
+OpenMPT's development environment, or a compatibility promise tied to
+`r25644`. The identifiers and imported history below remain useful provenance,
+but the current effort treats the checked-in source as a **Starting Snapshot**.
+Exact SVN-export verification, selective-sync procedure, and baseline
+compatibility are not gates for personal-use development. If public release or
+formal upstream intake later becomes a goal, those policies must be reconsidered
+in a fresh map rather than silently reactivated.
+
 ## Answer
 
 ### Decision

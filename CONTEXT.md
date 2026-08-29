@@ -4,9 +4,9 @@ An OpenMPT-derived music tracker that adds a human-facing piano-roll editor and 
 
 ## Language
 
-**Upstream Baseline**:
-The OpenMPT version from which this project begins and with which its initial behavior and file handling remain compatible. Later OpenMPT releases are not automatically part of this compatibility promise.
-_Avoid_: Latest OpenMPT, upstream-compatible fork
+**Starting Snapshot**:
+The checked-in OpenMPT source from which this project begins. It records provenance and supplies reusable implementation, but it does not promise behavioral fidelity, reproduce OpenMPT's development environment, require exact SVN verification, or constrain later divergence.
+_Avoid_: Upstream Baseline, compatibility target, latest OpenMPT
 
 **Tracker Pattern**:
 A musical structure indexed by rows and channels that contains notes, instruments, volume data, effects, and other tracker events. It remains the canonical editable music representation.
@@ -19,6 +19,10 @@ _Avoid_: AI preview, MIDI model
 **Score Context**:
 A revision-bound symbolic account of the project or fragment presented to an AI collaborator. It remains the canonical musical account even when accompanied by a Piano Roll rendering or listening opinion.
 _Avoid_: Piano-roll context, visual score
+
+**Document Revision**:
+A monotonic identity for one state of an open project document, used to reject stale AI proposals and bind review evidence to the music it describes. It is a product-safety concept, not a source-control commit, release version, or claim of compatibility with the Starting Snapshot.
+_Avoid_: Product version, Git revision, upstream revision
 
 **Audio Preview**:
 A time-bounded audio file rendered from the same project revision and musical range as a Score Context. It is intended for the Mini Audio Reviewer rather than being treated as live project state.
@@ -65,5 +69,5 @@ A bounded, document-lifetime record of a mutation request's identity, payload ha
 _Avoid_: Project history, retry token
 
 **Release Unit**:
-The version-locked application, MCP Sidecar, required helpers, runtime resources, and attribution material distributed and upgraded together as one product release. Its components are not independently supported packages.
+The version-locked application, MCP Sidecar, required helpers, runtime resources, and attribution material that would be distributed and upgraded together as one public product release. It is a publication-stage concept and is not part of the current personal-use destination.
 _Avoid_: Sidecar package, application bundle

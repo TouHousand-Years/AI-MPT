@@ -15,7 +15,7 @@ For the balanced synchronized split and Piano Roll focus layouts, which selectio
 
 The workspace contract extends OpenMPT's existing Pattern view rather than replacing application-level behavior. Document/view lifetime, `PatternCursor`, `PatternRect`, Pattern undo/redo, MultiView, Follow Song, settings storage, Save As, and multi-instance settings coordination remain owned by the pinned OpenMPT baseline. The Piano Roll adapts those mechanisms and adds only the state required by the synchronized projection.
 
-Current upstream evidence confirms existing `PatternViewState`, per-view save/load, and per-song window-state persistence. Exact seams and names must be verified against the pinned `r25644` source after issue 12 bootstraps it; this issue does not authorize a parallel JSON store, content-signature identity, revision-remapping system, or replacement document lifecycle.
+Current source evidence confirms existing `PatternViewState`, per-view save/load, and per-song window-state persistence. Exact seams and names must be checked against the checked-in Starting Snapshot before editing them; this issue does not authorize a parallel JSON store, content-signature identity, revision-remapping system, or replacement document lifecycle.
 
 ## Answer
 

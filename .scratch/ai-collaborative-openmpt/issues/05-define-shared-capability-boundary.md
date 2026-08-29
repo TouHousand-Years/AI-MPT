@@ -11,6 +11,14 @@ Which stable query, edit, and operational capabilities should the first shared a
 
 ## Comments
 
+### Implementation scope correction — 2026-08-29
+
+The capability boundary remains a design direction, not a mandate to migrate
+OpenMPT wholesale before useful work begins. The current map introduces only
+the Pattern queries and edits required by the active vertical slice. Broader
+base, Order, audition, plugin, and project capabilities graduate after real use
+shows that they are needed.
+
 The design was grilled in rounds and confirmed by the human collaborator on 2026-08-28. The capability priority below uses workflow centrality inferred from the official OpenMPT manuals, default command surface, and the pinned-source inventory in issue 02; OpenMPT publishes no user-operation telemetry, so it is not a claim about measured click frequency. Issue 08 later refines proposal review: Agent operations before handoff affect a private candidate state, and only the human-approved accepted subset becomes one project commit.
 
 ## Answer

@@ -11,6 +11,16 @@ What project identity, licensing and attribution presentation, executable and si
 
 ## Comments
 
+### Scope correction — 2026-08-29
+
+This distribution contract is no longer active in the current map. The owner is
+building for personal use and does not currently need public packaging,
+publication-grade version governance, strict `r25644` compatibility, CI release
+gates, or upstream intake policy. User-data isolation and preservation of
+existing license notices remain useful safety boundaries. Everything else below
+is retained as historical design material and must be reconsidered in a fresh
+publication map if the owner later chooses to release the project.
+
 The distribution design was grilled in nine rounds and confirmed by the human collaborator on 2026-08-28. It applies the pinned provenance and selective-sync policy from issue 01 and the local, client-supervised sidecar topology from issue 06. During review, the first release was deliberately narrowed to an unsigned Developer Preview: signing, supply-chain attestations, automated updating, security maintenance, and mature package channels remain later work rather than functional prerequisites.
 
 ## Answer
