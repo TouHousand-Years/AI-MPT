@@ -12,7 +12,7 @@ A clear implementation path to a locally useful personal OpenMPT derivative in w
 - Domain: Windows desktop music tracker, C++/MFC OpenMPT codebase, local MCP integration, human-in-the-loop AI composition.
 - Consult `grilling`, `domain-modeling`, `research`, and `prototype` as indicated by each ticket.
 - The Piano Roll is primarily a human editor and edits the existing Tracker Pattern model. Score Context remains the canonical AI representation.
-- AI writes retain document-revision checks, deliberate human apply, atomic mutation, and ordinary undo as product-safety principles. The first slice does not have to implement the complete lease, receipt, partial-acceptance, impact-tier, or mandatory-audition machinery already designed for a mature system.
+- AI writes retain document-revision checks, deliberate human apply, atomic mutation, and ordinary undo as product-safety principles. The first slice uses a minimal visible occupancy protocol across Agent tool calls, but does not have to implement the complete mature lease, receipt, partial-acceptance, impact-tier, or mandatory-audition machinery.
 - Prefer a local MCP sidecar and a narrow Application Capability seam over GUI automation or embedding AI protocol handling in the audio/UI core. Expose only the capabilities required by the current vertical slice; do not build a complete facade in advance.
 - **Reuse the existing OpenMPT implementation where it lowers effort**: Tracker data and event semantics, Pattern editing, format I/O, undo/redo, playback, and offline rendering are starting materials rather than behavior that must remain byte-for-byte compatible.
 - The `r25644` source under `openmpt-original_ref/` is the project's **Starting Snapshot**. It is not an active compatibility target, a reason to duplicate OpenMPT's development environment, or a requirement for continued upstream synchronization and exact SVN verification.
@@ -35,11 +35,13 @@ A clear implementation path to a locally useful personal OpenMPT derivative in w
 - [Piano Roll workspace state and synchronization](issues/10-define-piano-roll-workspace-state.md): extend the native Pattern view and its state lifecycle; retain `PatternRect`, MultiView, Follow Song, and existing settings infrastructure while adding synchronized Piano Roll layout, viewport, filter, lane, and focus state without module metadata.
 - [Initial independent product identity](issues/11-choose-independent-product-identity.md): use `OpenMPT for AI` and `OpenMPT-for-AI` only as provisional working/repository names, centralize the `OpenMPTForAI` engineering prefix and isolate its user data, provide minimal independent-derivative attribution, and defer final branding and open-source publication concerns until the owner is satisfied with a releasable version.
 - [Available OpenMPT starting source](issues/12-bootstrap-upstream-source-tree.md): the imported Git tree under `openmpt-original_ref/` is sufficient to begin local development; the unperformed canonical SVN export comparison is no longer a closure gate.
+- [First personally useful vertical slice](issues/20-define-first-personally-useful-vertical-slice.md): validate one local MCP-driven, single-Pattern proposal loop with melody-to-harmony and harmony-to-melody tests, single-voice candidate calls, visible cross-call occupancy, whole-proposal review and atomic apply, normal playback plus undo, and human Save As/reopen confirmation; Order AI/UI, cross-Pattern work, and full-song autonomy are deferred.
+- [Smallest local build-and-run loop](issues/21-establish-smallest-local-build-run-loop.md): use VS Code with Visual Studio Build Tools 2022 to build and debug only the `vs2022win10` `Debug|x64` desktop project, retargeted to the installed Windows SDK 26100; the `vs2022win11` project requires a newer OS than this host.
 
 ## Not yet specified
 
 - Which additional Pattern, Order, instrument, sample, plugin, filesystem, and export capabilities become useful after the first bounded Pattern workflow.
-- Whether real use justifies partial Review Unit acceptance, mandatory audition, impact tiers, write leases, Operation Receipts, multi-instance routing, or broader fault-injection work.
+- Whether real use justifies partial Review Unit acceptance, mandatory audition, impact tiers, the complete mature lease, Operation Receipts, multi-instance routing, or broader fault-injection work beyond the first slice's minimal occupancy.
 - Whether audio review should become part of the ordinary AI loop, remain an optional enrichment, or be omitted.
 - Whether later phases should model tracker-specific playback semantics such as NNA, note delay, retrigger, and inferred note duration more deeply in the Piano Roll.
 

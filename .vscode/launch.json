@@ -1,0 +1,15 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "OpenMPT Debug x64",
+			"type": "cppvsdbg",
+			"request": "launch",
+			"program": "${workspaceFolder}\\openmpt-original_ref\\bin\\debug\\vs2022-win10-static\\amd64\\OpenMPT.exe",
+			"cwd": "${workspaceFolder}\\openmpt-original_ref\\bin\\debug\\vs2022-win10-static\\amd64",
+			"stopAtEntry": true,
+			"console": "internalConsole",
+			"preLaunchTask": "Build OpenMPT Debug x64"
+		}
+	]
+}
