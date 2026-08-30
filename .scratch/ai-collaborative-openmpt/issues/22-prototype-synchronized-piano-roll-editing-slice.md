@@ -2,7 +2,7 @@
 
 Parent: ../map.md
 Type: prototype
-Status: open
+Status: resolved
 Blocked by: 03, 10, 20, 21
 
 ## Question
@@ -19,7 +19,7 @@ The prototype should favor a thin, reviewable integration over production
 completeness. It resolves the useful UI and code seam before Piano Roll Focus,
 auxiliary polish, or broad tracker semantics are attempted.
 
-### Native prototype debugging log — 2026-08-29
+### Native prototype debugging log — 2026-08-29 to 2026-08-30
 
 The first human review failed. The owner reported that the pane was not
 recognizable as a Piano Roll and supplied screenshots showing severe repaint
@@ -61,8 +61,7 @@ legibility. The revised pane removes the high-resolution width cap and adds a
 visible piano keyboard, alternating black/white pitch lanes, a time ruler, and
 wider minimum note blocks.
 
-The next human pass must satisfy all of these checks before the prototype can
-again be called ready:
+The final review used the following acceptance checks:
 
 1. Scroll the Tracker up and down at least 20 times; the Piano Roll title,
    keyboard, grid, notes, legend, and state line must each remain single and
@@ -78,14 +77,12 @@ again be called ready:
    tracker-detail markers rather than fabricated pitched notes.
 
 The changed Pattern translation units (`Draw_pat.cpp`, `View_pat.cpp`, and
-their header) compile successfully with the standard x64 DEBUG project target;
-the full executable remains at
-`openmpt-original_ref/bin/debug/vs2022-win10-static/amd64/OpenMPT.exe` from the
-last successful link. A second compile-only check after the child-window
-destruction cleanup is pending because the build host's elevated SDK probe
-failed before MSBuild launched. Static diff checking reports no content errors.
-GUI acceptance remains pending the owner's manual pass above; no Computer Use
-result is being substituted for that review.
+their header) compile and link successfully with the standard x64 DEBUG
+project target. The reviewed executable is
+`openmpt-original_ref/bin/debug/vs2022-win10-static/amd64/OpenMPT.exe`, built at
+2026-08-30 03:20:10 +08:00, 40,230,912 bytes, SHA-256
+`FD87E183E86B6D5C12D13FF6D4E1DDBBD2A41CDECFF0E0BA65CC4CFF0645AC65`.
+No Computer Use result is substituted for the owner's review.
 
 - Build/run artifact: `openmpt-original_ref/bin/debug/vs2022-win10-static/amd64/OpenMPT.exe`.
 - The prototype is an explicitly labelled, dependency-free GDI pane inside the
@@ -120,6 +117,25 @@ saving the opened modules:
 4. `Hear (F7)` started normal Pattern playback and produced a synchronized
    playhead in Tracker and Piano Roll; playback was then stopped normally.
 
-Owner review is still required before this prototype is captured or the issue
-is resolved. The first review is recorded as failed, not as evidence of
-completion.
+### Owner verdict — 2026-08-30
+
+The owner rejected the first visual pass, then manually tested the rebuilt
+executable after the child-pane and selection-style corrections. The owner
+confirmed that the reported refresh flicker, apparent overlap with a
+many-channel Tracker, and barely visible selected-note treatment were resolved.
+This confirmation applies to the executable identity recorded above rather
+than the stale 00:11 build used in the preceding failed report.
+
+Together with the native interaction smoke evidence, the prototype answers its
+question: a useful first slice can remain inside the existing Pattern Editor,
+project the active native `CPattern` into a recognizable time-horizontal Piano
+Roll, share `PatternRect` selection and playback state, mutate one native note,
+and reuse ordinary Pattern undo without a parallel note store. Unsupported
+tracker details must remain explicit markers, not invented Piano Roll notes.
+
+The prototype does **not** establish production architecture or completeness.
+It leaves Piano Roll Focus, note insertion and resizing, auxiliary lanes,
+cross-Pattern / Order work, formal accessibility and polish, and broad tracker
+semantics to later issues. The captured primary-source revision is commit
+`18e3156fd0b5936e53a55bf68fcaa32a4ea70545` on branch
+`prototype/synchronized-piano-roll-editing-slice`.

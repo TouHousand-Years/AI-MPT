@@ -22,13 +22,13 @@ flowchart LR
     I16["16 · Compatibility lifecycle<br/>closed · out of scope"]
     I17["17 · Developer Preview<br/>closed · out of scope"]
     I18["18 · Post-preview maintenance<br/>closed · out of scope"]
-    I19["19 · Piano Roll subordinate Tracker UI<br/>open"]
+    I19["19 · Piano Roll subordinate Tracker UI<br/>resolved"]
     I20["20 · First useful vertical slice<br/>resolved"]
     I21["21 · Smallest local build loop<br/>resolved"]
-    I22["22 · Synchronized Piano Roll slice<br/>open"]
-    I23["23 · Minimum AI Pattern capabilities<br/>open"]
-    I24["24 · Local MCP round trip<br/>open"]
-    I25["25 · Proposal-review-apply loop<br/>open"]
+    I22["22 · Synchronized Piano Roll slice<br/>resolved"]
+    I23["23 · Minimum AI Pattern capabilities<br/>resolved"]
+    I24["24 · Local MCP round trip<br/>resolved"]
+    I25["25 · Proposal-review-apply loop<br/>resolved"]
 
     I12 --> I21
     I20 --> I21
@@ -54,8 +54,7 @@ flowchart LR
     classDef open fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e
     classDef outscope fill:#f3f4f6,stroke:#6b7280,color:#374151
     class I01,I02,I03,I04,I05,I06,I07,I08,I10,I11,I12 resolved
-    class I20,I21 resolved
-    class I19,I22,I23,I24,I25 open
+    class I19,I20,I21,I22,I23,I24,I25 resolved
     class I09,I13,I14,I15,I16,I17,I18 outscope
 ```
 
@@ -82,4 +81,4 @@ flowchart LR
 | Local MCP round trip | First proposal-review-apply loop |
 | First proposal-review-apply loop | Piano Roll Focus subordinate Tracker UI |
 
-当前开放前沿是 `19`、`22`、`23`、`24`、`25`。其中 `22` 依赖已解决的 `03`、`10`、`20`、`21`；`23` 依赖已解决的 `05`、`20`；`22` 与 `23` 汇入 `24` 和 `25`，最终 `25` 与 `22` 一起阻塞 `19`。`09`、`13`–`18` 虽在元数据中为 `resolved`，但正文明确标记为当前目的地之外关闭，因此以灰色历史节点展示。
+当前 25 个票据中已没有开放票据。`19` 在 `03`、`10`、`22`、`25` 四个前置均满足后，经人工选择采用 B 版极窄事件轨并已解决。Issue 24 和 25 的结论是经人工确认的逻辑与责任边界，并未声称真实 stdio、named pipe、OpenMPT 原生事务或完整个人工作流已经实现。`09`、`13`–`18` 虽在元数据中为 `resolved`，但正文明确标记为当前目的地之外关闭，因此以灰色历史节点展示。
