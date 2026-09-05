@@ -1,0 +1,292 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2890" height="2570" viewBox="0 0 2890 2570" role="img" aria-labelledby="title desc">
+  <title id="title">OpenMPT for AI: path to a personally useful vertical slice 的阻塞关系图</title>
+  <desc id="desc">Wayfinder 子任务、类型、状态与阻塞关系；箭头由阻塞任务指向被阻塞任务。</desc>
+  <defs>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#15803d"/></marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.12"/></filter>
+    <style>
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #0f172a; }
+      .subtitle { font: 16px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #475569; }
+      .node-title { font: 700 18px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .node-type { font: 12px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .node-status { font: 14px "Segoe UI", "Microsoft YaHei", sans-serif; }
+      .legend { font: 15px "Segoe UI", "Microsoft YaHei", sans-serif; fill: #334155; }
+      .section { font: 700 15px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #64748b; letter-spacing: 1px; }
+      .edge-done { fill: none; stroke: #15803d; stroke-width: 3; marker-end: url(#arrow-green); }
+      .edge-open { fill: none; stroke: #c2410c; stroke-width: 3.5; stroke-dasharray: 10 8; marker-end: url(#arrow-orange); }
+    </style>
+  </defs>
+  <rect width="2890" height="2570" fill="#f8fafc"/>
+  <text x="80" y="58" class="title">OpenMPT for AI: path to a personally useful vertical slice 的阻塞关系图</text>
+  <text x="80" y="88" class="subtitle">Map 类型：wayfinder:map · 箭头方向：阻塞任务 → 被阻塞任务</text>
+  <rect x="80" y="111" width="18" height="18" rx="4" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="108" y="125" class="legend">resolved</text>
+  <rect x="255" y="111" width="18" height="18" rx="4" fill="#f8fafc" stroke="#64748b" stroke-width="2"/>
+  <text x="283" y="125" class="legend">open</text>
+  <rect x="430" y="111" width="18" height="18" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="458" y="125" class="legend">ready-for-agent</text>
+  <line x1="80" y1="152" x2="135" y2="152" class="edge-done"/>
+  <text x="150" y="157" class="legend">依赖已满足</text>
+  <line x1="290" y1="152" x2="345" y2="152" class="edge-open"/>
+  <text x="360" y="157" class="legend">仍可能阻塞</text>
+  <text x="80" y="217" class="section">上游</text>
+  <path d="M 380.0 1032.0 C 425.0 1032.0 440.0 312.0 485.0 312.0" class="edge-done"/>
+  <path d="M 380.0 1752.0 C 425.0 1752.0 440.0 312.0 485.0 312.0" class="edge-done"/>
+  <path d="M 380.0 1752.0 C 425.0 1752.0 440.0 492.0 485.0 492.0" class="edge-done"/>
+  <path d="M 380.0 312.0 C 425.0 312.0 440.0 672.0 485.0 672.0" class="edge-done"/>
+  <path d="M 380.0 1752.0 C 425.0 1752.0 440.0 672.0 485.0 672.0" class="edge-done"/>
+  <path d="M 785.0 672.0 C 830.0 672.0 845.0 312.0 890.0 312.0" class="edge-done"/>
+  <path d="M 380.0 1212.0 C 727.7 1212.0 947.3 312.0 1295.0 312.0" class="edge-done"/>
+  <path d="M 785.0 492.0 C 978.8 492.0 1101.2 312.0 1295.0 312.0" class="edge-done"/>
+  <path d="M 1190.0 312.0 C 1235.0 312.0 1250.0 312.0 1295.0 312.0" class="edge-done"/>
+  <path d="M 785.0 672.0 C 978.8 672.0 1101.2 492.0 1295.0 492.0" class="edge-done"/>
+  <path d="M 1190.0 312.0 C 1235.0 312.0 1250.0 492.0 1295.0 492.0" class="edge-done"/>
+  <path d="M 380.0 672.0 C 881.6 672.0 1198.4 312.0 1700.0 312.0" class="edge-done"/>
+  <path d="M 1595.0 312.0 C 1640.0 312.0 1655.0 312.0 1700.0 312.0" class="edge-done"/>
+  <path d="M 1595.0 492.0 C 1640.0 492.0 1655.0 312.0 1700.0 312.0" class="edge-done"/>
+  <path d="M 2000.0 312.0 C 2045.0 312.0 2060.0 312.0 2105.0 312.0" class="edge-done"/>
+  <path d="M 2405.0 312.0 C 2450.0 312.0 2465.0 312.0 2510.0 312.0" class="edge-done"/>
+  <path d="M 380.0 672.0 C 1035.5 672.0 1449.5 492.0 2105.0 492.0" class="edge-done"/>
+  <path d="M 785.0 312.0 C 1286.6 312.0 1603.4 492.0 2105.0 492.0" class="edge-done"/>
+  <path d="M 1595.0 672.0 C 1788.8 672.0 1911.2 492.0 2105.0 492.0" class="edge-done"/>
+  <path d="M 2000.0 492.0 C 2045.0 492.0 2060.0 492.0 2105.0 492.0" class="edge-done"/>
+  <path d="M 785.0 672.0 C 830.0 672.0 845.0 492.0 890.0 492.0" class="edge-done"/>
+  <path d="M 380.0 1932.0 C 573.8 1932.0 696.2 492.0 890.0 492.0" class="edge-done"/>
+  <path d="M 380.0 672.0 C 727.7 672.0 947.3 672.0 1295.0 672.0" class="edge-done"/>
+  <path d="M 785.0 312.0 C 978.8 312.0 1101.2 672.0 1295.0 672.0" class="edge-done"/>
+  <path d="M 380.0 1932.0 C 727.7 1932.0 947.3 672.0 1295.0 672.0" class="edge-done"/>
+  <path d="M 1190.0 492.0 C 1235.0 492.0 1250.0 672.0 1295.0 672.0" class="edge-done"/>
+  <path d="M 380.0 1032.0 C 425.0 1032.0 440.0 852.0 485.0 852.0" class="edge-done"/>
+  <path d="M 380.0 1932.0 C 425.0 1932.0 440.0 852.0 485.0 852.0" class="edge-done"/>
+  <path d="M 380.0 1212.0 C 727.7 1212.0 947.3 852.0 1295.0 852.0" class="edge-done"/>
+  <path d="M 1190.0 492.0 C 1235.0 492.0 1250.0 852.0 1295.0 852.0" class="edge-done"/>
+  <path d="M 785.0 852.0 C 978.8 852.0 1101.2 852.0 1295.0 852.0" class="edge-done"/>
+  <path d="M 380.0 1572.0 C 881.6 1572.0 1198.4 492.0 1700.0 492.0" class="edge-done"/>
+  <path d="M 1595.0 672.0 C 1640.0 672.0 1655.0 492.0 1700.0 492.0" class="edge-done"/>
+  <path d="M 785.0 852.0 C 1132.7 852.0 1352.3 492.0 1700.0 492.0" class="edge-done"/>
+  <path d="M 1595.0 852.0 C 1640.0 852.0 1655.0 492.0 1700.0 492.0" class="edge-done"/>
+  <path d="M 2405.0 492.0 C 2450.0 492.0 2465.0 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 380.0 1932.0 C 1189.4 1932.0 1700.6 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 1190.0 492.0 C 1691.6 492.0 2008.4 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 1595.0 672.0 C 1942.7 672.0 2162.3 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 785.0 852.0 C 1440.5 852.0 1854.5 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 1595.0 852.0 C 1942.7 852.0 2162.3 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 2000.0 492.0 C 2193.8 492.0 2316.2 492.0 2510.0 492.0" class="edge-done"/>
+  <path d="M 380.0 2292.0 C 425.0 2292.0 440.0 1032.0 485.0 1032.0" class="edge-open"/>
+  <path d="M 785.0 1032.0 C 830.0 1032.0 845.0 672.0 890.0 672.0" class="edge-open"/>
+  <path d="M 1190.0 672.0 C 1235.0 672.0 1250.0 1032.0 1295.0 1032.0" class="edge-open"/>
+  <path d="M 785.0 1032.0 C 830.0 1032.0 845.0 852.0 890.0 852.0" class="edge-open"/>
+  <path d="M 380.0 2112.0 C 881.6 2112.0 1198.4 672.0 1700.0 672.0" class="edge-open"/>
+  <path d="M 380.0 2292.0 C 881.6 2292.0 1198.4 672.0 1700.0 672.0" class="edge-open"/>
+  <path d="M 1595.0 1032.0 C 1640.0 1032.0 1655.0 672.0 1700.0 672.0" class="edge-open"/>
+  <path d="M 1190.0 852.0 C 1383.8 852.0 1506.2 672.0 1700.0 672.0" class="edge-open"/>
+  <path d="M 2000.0 672.0 C 2045.0 672.0 2060.0 672.0 2105.0 672.0" class="edge-open"/>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">01 Pin the Upstream Bas</tspan><tspan x="230.0" dy="20">eline and source workfl</tspan></text>
+<text x="230.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: research</tspan></text>
+<text x="230.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">02 Inventory OpenMPT ca</tspan><tspan x="230.0" dy="20">pabilities and architec</tspan></text>
+<text x="230.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: research</tspan></text>
+<text x="230.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="605.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="630.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">03 Prototype Piano Roll</tspan><tspan x="230.0" dy="20"> projection and editing</tspan></text>
+<text x="230.0" y="682.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: prototype</tspan></text>
+<text x="230.0" y="709.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="785.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="810.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">04 Evaluate symbolic Sc</tspan><tspan x="230.0" dy="20">ore Context representat</tspan></text>
+<text x="230.0" y="862.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: research</tspan></text>
+<text x="230.0" y="889.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="965.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="990.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">05 Define the shared Ap</tspan><tspan x="230.0" dy="20">plication Capability bo</tspan></text>
+<text x="230.0" y="1042.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: grilling</tspan></text>
+<text x="230.0" y="1069.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="1145.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="1170.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">06 Choose MCP sidecar I</tspan><tspan x="230.0" dy="20">PC and lifecycle</tspan></text>
+<text x="230.0" y="1222.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: grilling</tspan></text>
+<text x="230.0" y="1249.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="1325.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="1350.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">07 Choose the AI Score </tspan><tspan x="230.0" dy="20">Context and Audio Previ</tspan></text>
+<text x="230.0" y="1402.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: grilling</tspan></text>
+<text x="230.0" y="1429.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="1505.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="1530.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">08 Prototype the review</tspan><tspan x="230.0" dy="20">able AI change workflow</tspan></text>
+<text x="230.0" y="1582.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: prototype</tspan></text>
+<text x="230.0" y="1609.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="1685.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="1710.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">09 Choose the independe</tspan><tspan x="230.0" dy="20">nt project&#x27;s distributi</tspan></text>
+<text x="230.0" y="1762.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: grilling</tspan></text>
+<text x="230.0" y="1789.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="485.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="635.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="635.0" dy="0">10 Define Piano Roll wo</tspan><tspan x="635.0" dy="20">rkspace state and synch</tspan></text>
+<text x="635.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="635.0" dy="0">Type: grilling</tspan></text>
+<text x="635.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="635.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="485.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="635.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="635.0" dy="0">11 Choose the independe</tspan><tspan x="635.0" dy="20">nt product identity</tspan></text>
+<text x="635.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="635.0" dy="0">Type: grilling</tspan></text>
+<text x="635.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="635.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="485.0" y="605.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="635.0" y="630.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="635.0" dy="0">12 Bootstrap the pinned</tspan><tspan x="635.0" dy="20"> upstream source tree</tspan></text>
+<text x="635.0" y="682.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="635.0" dy="0">Type: task</tspan></text>
+<text x="635.0" y="709.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="635.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="890.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1040.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1040.0" dy="0">13 Establish the reprod</tspan><tspan x="1040.0" dy="20">ucible build and CI bas</tspan></text>
+<text x="1040.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1040.0" dy="0">Type: task</tspan></text>
+<text x="1040.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1040.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1295.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1445.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1445.0" dy="0">14 Package the installe</tspan><tspan x="1445.0" dy="20">r, portable application</tspan></text>
+<text x="1445.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1445.0" dy="0">Type: task</tspan></text>
+<text x="1445.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1445.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1295.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1445.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1445.0" dy="0">15 Audit release licens</tspan><tspan x="1445.0" dy="20">es and source distribut</tspan></text>
+<text x="1445.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1445.0" dy="0">Type: task</tspan></text>
+<text x="1445.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1445.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1700.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1850.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1850.0" dy="0">16 Verify compatibility</tspan><tspan x="1850.0" dy="20"> and distribution lifec</tspan></text>
+<text x="1850.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1850.0" dy="0">Type: task</tspan></text>
+<text x="1850.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1850.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="2105.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="2255.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="2255.0" dy="0">17 Publish the first De</tspan><tspan x="2255.0" dy="20">veloper Preview</tspan></text>
+<text x="2255.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="2255.0" dy="0">Type: task</tspan></text>
+<text x="2255.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="2255.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="2510.0" y="245.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="2660.0" y="270.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="2660.0" dy="0">18 Harden post-preview </tspan><tspan x="2660.0" dy="20">distribution and mainte</tspan></text>
+<text x="2660.0" y="322.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="2660.0" dy="0">Type: research</tspan></text>
+<text x="2660.0" y="349.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="2660.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="2105.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="2255.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="2255.0" dy="0">19 Prototype Piano Roll</tspan><tspan x="2255.0" dy="20"> Focus subordinate Trac</tspan></text>
+<text x="2255.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="2255.0" dy="0">Type: prototype</tspan></text>
+<text x="2255.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="2255.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="1865.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="230.0" y="1890.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="230.0" dy="0">20 Define the first per</tspan><tspan x="230.0" dy="20">sonally useful vertical</tspan></text>
+<text x="230.0" y="1942.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="230.0" dy="0">Type: grilling</tspan></text>
+<text x="230.0" y="1969.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="230.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="890.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1040.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1040.0" dy="0">21 Establish the smalle</tspan><tspan x="1040.0" dy="20">st local build-and-run </tspan></text>
+<text x="1040.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1040.0" dy="0">Type: task</tspan></text>
+<text x="1040.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1040.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1295.0" y="605.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1445.0" y="630.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1445.0" dy="0">22 Prototype the synchr</tspan><tspan x="1445.0" dy="20">onized Piano Roll editi</tspan></text>
+<text x="1445.0" y="682.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1445.0" dy="0">Type: prototype</tspan></text>
+<text x="1445.0" y="709.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1445.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="485.0" y="785.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="635.0" y="810.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="635.0" dy="0">23 Choose the minimum A</tspan><tspan x="635.0" dy="20">I Pattern capability sl</tspan></text>
+<text x="635.0" y="862.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="635.0" dy="0">Type: grilling</tspan></text>
+<text x="635.0" y="889.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="635.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1295.0" y="785.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1445.0" y="810.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1445.0" dy="0">24 Prototype the local </tspan><tspan x="1445.0" dy="20">MCP round trip</tspan></text>
+<text x="1445.0" y="862.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1445.0" dy="0">Type: prototype</tspan></text>
+<text x="1445.0" y="889.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1445.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1700.0" y="425.0" width="300" height="134" rx="14" fill="#dcfce7" stroke="#15803d" stroke-width="2.5"/>
+<text x="1850.0" y="450.0" text-anchor="middle" class="node-title" fill="#14532d"><tspan x="1850.0" dy="0">25 Prototype the first </tspan><tspan x="1850.0" dy="20">proposal-review-apply l</tspan></text>
+<text x="1850.0" y="502.0" text-anchor="middle" class="node-type" fill="#14532d"><tspan x="1850.0" dy="0">Type: prototype</tspan></text>
+<text x="1850.0" y="529.0" text-anchor="middle" class="node-status" fill="#14532d"><tspan x="1850.0" dy="0">resolved</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="2510.0" y="425.0" width="300" height="134" rx="14" fill="#f8fafc" stroke="#64748b" stroke-width="2.5"/>
+<text x="2660.0" y="450.0" text-anchor="middle" class="node-title" fill="#334155"><tspan x="2660.0" dy="0">26 Implement the first </tspan><tspan x="2660.0" dy="20">personal vertical slice</tspan></text>
+<text x="2660.0" y="502.0" text-anchor="middle" class="node-type" fill="#334155"><tspan x="2660.0" dy="0">Type: spec</tspan></text>
+<text x="2660.0" y="529.0" text-anchor="middle" class="node-status" fill="#334155"><tspan x="2660.0" dy="0">open</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="2045.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="230.0" y="2070.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="230.0" dy="0">27 27: Piano Roll pane </tspan><tspan x="230.0" dy="20">into the main developme</tspan></text>
+<text x="230.0" y="2122.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="230.0" dy="0">Type: unknown</tspan></text>
+<text x="230.0" y="2149.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="230.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="80.0" y="2225.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="230.0" y="2250.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="230.0" dy="0">28 28: MPTM collaborati</tspan><tspan x="230.0" dy="20">on fixture</tspan></text>
+<text x="230.0" y="2302.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="230.0" dy="0">Type: unknown</tspan></text>
+<text x="230.0" y="2329.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="230.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="485.0" y="965.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="635.0" y="990.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="635.0" dy="0">29 29: Pattern capabili</tspan><tspan x="635.0" dy="20">ty seam with the five P</tspan></text>
+<text x="635.0" y="1042.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="635.0" dy="0">Type: unknown</tspan></text>
+<text x="635.0" y="1069.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="635.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="890.0" y="605.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="1040.0" y="630.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="1040.0" dy="0">30 30: App-side IPC bro</tspan><tspan x="1040.0" dy="20">ker with owning-thread </tspan></text>
+<text x="1040.0" y="682.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="1040.0" dy="0">Type: unknown</tspan></text>
+<text x="1040.0" y="709.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="1040.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1295.0" y="965.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="1445.0" y="990.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="1445.0" dy="0">31 31: MCP Sidecar proc</tspan><tspan x="1445.0" dy="20">ess (stdio translator)</tspan></text>
+<text x="1445.0" y="1042.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="1445.0" dy="0">Type: unknown</tspan></text>
+<text x="1445.0" y="1069.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="1445.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="890.0" y="785.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="1040.0" y="810.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="1040.0" dy="0">32 32: Proposal review </tspan><tspan x="1040.0" dy="20">UI and atomic Apply in </tspan></text>
+<text x="1040.0" y="862.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="1040.0" dy="0">Type: unknown</tspan></text>
+<text x="1040.0" y="889.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="1040.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1700.0" y="605.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="1850.0" y="630.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="1850.0" dy="0">33 33: End-to-end Agent</tspan><tspan x="1850.0" dy="20"> loop: melody↔harmony b</tspan></text>
+<text x="1850.0" y="682.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="1850.0" dy="0">Type: unknown</tspan></text>
+<text x="1850.0" y="709.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="1850.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="2105.0" y="605.0" width="300" height="134" rx="14" fill="#ede9fe" stroke="#7c3aed" stroke-width="2.5"/>
+<text x="2255.0" y="630.0" text-anchor="middle" class="node-title" fill="#4c1d95"><tspan x="2255.0" dy="0">34 34: Vertical-slice v</tspan><tspan x="2255.0" dy="20">erification: Save As, r</tspan></text>
+<text x="2255.0" y="682.0" text-anchor="middle" class="node-type" fill="#4c1d95"><tspan x="2255.0" dy="0">Type: unknown</tspan></text>
+<text x="2255.0" y="709.0" text-anchor="middle" class="node-status" fill="#4c1d95"><tspan x="2255.0" dy="0">ready-for-agent</tspan></text>
+  </g>
+  <rect x="80" y="2465" width="2730" height="70" rx="12" fill="#fff7ed" stroke="#fb923c" stroke-width="1.5"/>
+  <text x="105" y="2495" class="legend" fill="#9a3412">当前仍可能阻塞：28 → 29、29 → 30、30 → 31、29 → 32、27 → 33、28 → 33、31 → 33、32 → 33、33 → 34</text>
+  <text x="105" y="2522" class="legend" fill="#9a3412">节点数：34 · 依赖边数：51</text>
+</svg>
