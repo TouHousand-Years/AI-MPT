@@ -1431,6 +1431,7 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 
 	if(TrackerSettings::Instance().MiscUseSingleInstance && IPCWindow::SendToIPC(cmdInfo.m_fileNames, cmdInfo.m_autoPlay))
 	{
+		AI::TestTrace("startup: single-instance IPC forward, exiting");
 		ExitProcess(0);
 	}
 
@@ -1479,9 +1480,11 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	CMainFrame *pMainFrame = new CMainFrame();
 	if(!pMainFrame->LoadFrame(IDR_MAINFRAME))
 	{
+		AI::TestTrace("startup: LoadFrame failed");
 		return FALSE;
 	}
 	m_pMainWnd = pMainFrame;
+	AI::TestTrace("startup: LoadFrame ok");
 
 	// Show splash screen
 	if(cmdInfo.m_bShowSplash && TrackerSettings::Instance().m_ShowSplashScreen)
@@ -1601,6 +1604,7 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	}
 	if(!shellSuccess)
 	{
+		AI::TestTrace("startup: ProcessShellCommand failed");
 		EndWaitCursor();
 		StopSplashScreen();
 		return FALSE;
@@ -1609,12 +1613,19 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 #ifdef ENABLE_TESTS
 	if(const wchar_t *report = _wgetenv(L"OPENMPT_AI_ENDPOINT_REPORT"))
 	{
+		AI::TestTrace("startup: integration path entered");
 		if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))
-			if(auto *doc = static_cast<CModDoc *>(OpenDocumentFile(fixture, FALSE)))
+		{
+			auto *doc = static_cast<CModDoc *>(OpenDocumentFile(fixture, FALSE));
+			AI::TestTrace(doc ? "startup: fixture opened" : "startup: OpenDocumentFile returned null");
+			if(doc)
 			{
 				AI::IntegrationHost(*pMainFrame, *doc, report);
 				EndWaitCursor(); StopSplashScreen(); return TRUE;
 			}
+		}
+		else AI::TestTrace("startup: OPENMPT_AI_TEST_FIXTURE not set");
+		AI::TestTrace("startup: integration init failed");
 		return FALSE;
 	}
 	if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))

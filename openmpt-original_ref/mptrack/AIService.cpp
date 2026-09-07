@@ -19,6 +19,12 @@
 OPENMPT_NAMESPACE_BEGIN
 namespace AI
 {
+void TestTrace(const std::string &text)
+{
+	if(const wchar_t *report = _wgetenv(L"OPENMPT_AI_ENDPOINT_REPORT"))
+		std::ofstream(std::wstring(report) + L".trace", std::ios::app)
+			<< GetTickCount64() << " tid=" << GetCurrentThreadId() << " " << text << "\n";
+}
 namespace
 {
 constexpr DWORD MaxFrame = 4 * 1024 * 1024;
@@ -81,22 +87,39 @@ class Broker
 	{
 		HANDLE token = nullptr;
 		PSECURITY_DESCRIPTOR descriptor = nullptr;
-		if(!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return;
+		if(!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+		{
+			TestTrace("broker: OpenProcessToken failed err=" + std::to_string(GetLastError()));
+			return;
+		}
 		DWORD size = 0;
 		GetTokenInformation(token, TokenUser, nullptr, 0, &size);
 		std::vector<char> info(size);
 		bool valid = GetTokenInformation(token, TokenUser, info.data(), size, &size) != FALSE;
 		CloseHandle(token);
 		LPWSTR sid = nullptr;
-		if(!valid || !ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(info.data())->User.Sid, &sid)) return;
+		if(!valid || !ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(info.data())->User.Sid, &sid))
+		{
+			TestTrace("broker: token user / SID conversion failed");
+			return;
+		}
 		const std::wstring acl = L"D:P(A;;GA;;;" + std::wstring(sid) + L")";
 		LocalFree(sid);
-		if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(acl.c_str(), SDDL_REVISION_1, &descriptor, nullptr)) return;
+		if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(acl.c_str(), SDDL_REVISION_1, &descriptor, nullptr))
+		{
+			TestTrace("broker: SDDL conversion failed err=" + std::to_string(GetLastError()));
+			return;
+		}
 		SECURITY_ATTRIBUTES security{sizeof(security), descriptor, FALSE};
 		HANDLE pipe = CreateNamedPipeW(m_name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
 			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 65536, 65536, 0, &security);
 		LocalFree(descriptor);
-		if(pipe == INVALID_HANDLE_VALUE) return;
+		if(pipe == INVALID_HANDLE_VALUE)
+		{
+			TestTrace("broker: CreateNamedPipe failed err=" + std::to_string(GetLastError()));
+			return;
+		}
+		TestTrace("broker: pipe created");
 		m_running = true;
 		while(WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
 		{
@@ -208,6 +231,7 @@ public:
 #ifdef ENABLE_TESTS
 	std::wstring testReport;
 	ULONGLONG testDeadline = 0;
+	ULONGLONG tickTrace = 0;
 #endif
 	Panel(CWnd &owner)
 	{
@@ -240,6 +264,7 @@ public:
 		if(enable.GetCheck()) broker = std::make_unique<Broker>(pipe);
 		SetTimer(1, 100, nullptr);
 		RefreshIdentity();
+		TestTrace("panel: ctor done");
 	}
 	~Panel() { if(pending) pending->Complete(Failure("instanceGone", "Application stopping", "attachment")); capability.reset(); broker.reset(); }
 	void RefreshIdentity()
@@ -293,6 +318,9 @@ public:
 	}
 	void RefreshReview()
 	{
+		// Commands such as EN_CHANGE from the timeout edit re-enter here while
+		// the constructor is still creating child controls.
+		if(!evidence.GetSafeHwnd()) return;
 		review = capability && capability->HasProposal() ? capability->Review() : Json{};
 		evidence.ResetContent();
 		if(review.is_object() && review.value("ok", false))
@@ -361,7 +389,13 @@ public:
 #ifdef ENABLE_TESTS
 			if(testDeadline)
 			{
-				if(!testReport.empty()) std::ofstream(testReport + L".trace") << "timer broker=" << bool(broker && broker->Running()) << " view=" << bool(document && PatternView(*document));
+				if(!testReport.empty() && GetTickCount64() >= tickTrace)
+				{
+					tickTrace = GetTickCount64() + 2000;
+					TestTrace(std::string("tick broker=") + (broker && broker->Running() ? "1" : "0")
+						+ " view=" + (document && PatternView(*document) ? "1" : "0")
+						+ " doc=" + (document ? "1" : "0"));
+				}
 				const wchar_t *stop = _wgetenv(L"OPENMPT_AI_STOP_FILE");
 				if(GetTickCount64() >= testDeadline || (stop && GetFileAttributesW(stop) != INVALID_FILE_ATTRIBUTES))
 				{
@@ -373,7 +407,11 @@ public:
 						const wchar_t *pattern = _wgetenv(L"OPENMPT_AI_PATTERN");
 						view->SetCurrentPattern(pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0);
 						Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
-						std::ofstream(testReport) << info.dump(); testReport.clear();
+						const std::wstring tmp = testReport + L".tmp";
+						std::ofstream(tmp) << info.dump();
+						if(_wrename(tmp.c_str(), testReport.c_str()) == 0) TestTrace("endpoint written");
+						else TestTrace("endpoint rename failed err=" + std::to_string(GetLastError()));
+						testReport.clear();
 					}
 			}
 #endif
@@ -470,17 +508,16 @@ void Start(CWnd &owner) { if(!panel) panel = std::make_unique<Panel>(owner); }
 #ifdef ENABLE_TESTS
 void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 {
-	std::ofstream(std::wstring(report) + L".trace") << "before start";
+	TestTrace("host: enter");
 	Start(owner);
-	std::ofstream(std::wstring(report) + L".trace") << "after start";
 	panel->testReport = report;
 	panel->testDeadline = GetTickCount64() + 60000;
 	panel->document = &doc;
 	panel->enable.SetCheck(BST_CHECKED);
 	if(!panel->broker) panel->broker = std::make_unique<Broker>(panel->pipe);
-	std::ofstream(std::wstring(report) + L".trace") << "before activate";
+	TestTrace("host: started, broker=" + std::string(panel->broker && panel->broker->Running() ? "1" : "0"));
 	doc.ActivateView(IDD_CONTROL_PATTERNS, 0);
-	std::ofstream(std::wstring(report) + L".trace") << "after activate";
+	TestTrace(std::string("host: activated, view=") + (PatternView(doc) ? "1" : "0"));
 }
 #endif
 void Stop() { panel.reset(); }
