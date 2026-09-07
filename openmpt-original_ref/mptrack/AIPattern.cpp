@@ -18,8 +18,11 @@ static Json WithEndingReminder(Json result)
 }
 Json Failure(const char *code, const char *reason, const char *layer)
 {
-	return WithEndingReminder({{"ok", false}, {"error", {{"layer", layer}, {"code", code}, {"reason", reason}}}});
+	return {{"ok", false}, {"error", {{"layer", layer}, {"code", code}, {"reason", reason}}}};
 }
+
+// Volume column values range 0..64 in every supported module format.
+constexpr int MaxVolume = 64;
 
 static std::string Utf8(const mpt::ustring &value) { return mpt::ToCharset(mpt::Charset::UTF8, value); }
 static const char *NoteKind(ModCommand::NOTE note)
@@ -165,7 +168,7 @@ Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json
 			{"tempo_mode", int(sf.m_nTempoMode)}, {"rows_per_beat", pattern.GetOverrideSignature() ? pattern.GetRowsPerBeat() : sf.m_nDefaultRowsPerBeat},
 			{"rows_per_measure", pattern.GetOverrideSignature() ? pattern.GetRowsPerMeasure() : sf.m_nDefaultRowsPerMeasure}}},
 		{"format", {{"name", spec.fileExtension}, {"note_min", spec.noteMin}, {"note_max", spec.noteMax}, {"note_off", spec.hasNoteOff},
-			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? 64 : 0}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
+			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? MaxVolume : 0}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
 		{"instruments", instruments}, {"samples", samples}};
 }
 
@@ -183,6 +186,7 @@ Json PatternCapability::Call(const std::string &tool, const Json &args)
 			if(!capability.m_retained) capability.ForceRelease();
 		}
 	} end{*this};
+	// Sole reminder site for the five tools: results gain ending_reminder exactly once here.
 	return WithEndingReminder(Dispatch(tool, args));
 }
 
@@ -281,7 +285,7 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 	} else if(after.volcmd != before.volcmd || after.vol != before.vol)
 	{
 		if(after.volcmd != VOLCMD_NONE && after.volcmd != VOLCMD_VOLUME) return error("volume_command", after.volcmd, "Only ordinary volume values can be written");
-		if(after.volcmd == VOLCMD_VOLUME && (!spec.HasVolCommand(VOLCMD_VOLUME) || after.vol > 64)) return error("volume", after.vol, "Volume must be supported and between 0 and 64");
+		if(after.volcmd == VOLCMD_VOLUME && (!spec.HasVolCommand(VOLCMD_VOLUME) || after.vol > MaxVolume)) return error("volume", after.vol, "Volume must be supported and between 0 and 64");
 		if(after.volcmd == VOLCMD_NONE && after.vol != 0) return error("volume", after.vol, "An empty volume column must have value zero");
 	}
 	return {{"ok", true}};

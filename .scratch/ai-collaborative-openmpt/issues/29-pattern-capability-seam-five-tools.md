@@ -46,3 +46,48 @@ Verification:
 
 Code review was intentionally not started, per the owner's requested pause
 point.
+
+## Code review — 2026-09-07
+
+Two-axis review (standards, spec) of commit 579ffd7e5. Standards axis found no
+documented-standard violations. Spec axis confirmed the five tools, occupancy,
+signature, envelope and Apply behaviour present and tested; findings below.
+
+Fixes applied:
+
+- `ending_reminder` is now written exactly once per agent-facing result, at the
+  `Call` boundary (and the resumed expansion result). `AI::Failure` no longer adds
+  it, so transport/attachment failures and owner-side callbacks (Review/Reject/
+  Apply) no longer carry agent session guidance.
+- The volume column maximum (64, universal across supported module formats —
+  ModSpecifications has no per-format field) is one named `MaxVolume` constant used
+  by both Score Context and validation.
+- `build-local.ps1` guards both report reads with clear errors when the test runner
+  produced no report, and collapses the three env-var save/restore pairs into one
+  loop.
+
+Recorded design interpretations (review findings accepted as-is):
+
+- Session-less writes are refused with `occupancyLost`: the write envelope, baseline
+  and candidate are born at session binding, so a write cannot precede a session;
+  issue 23's "short occupancy per call" is realized on the context read that starts
+  every session.
+- Expansion approval does not literally pause the in-flight call: on the single UI
+  thread the call returns `pending_approval` and ends, the timeout is paused while
+  the request is pending, and the exact request is replayed on approval.
+- While a frozen proposal exists, fresh session-less reads return `busy`: one
+  proposal at a time; Reject/Apply reopens reading, and the agent re-reads after
+  Reject.
+- The tool allowlist early in `Dispatch` gives unknown tools a clean `unsupported`
+  error before any session state is touched; the terminal `Failure("unsupported")`
+  after the chain is an unreachable guard (and keeps every path returning).
+- `SameRaw` compares all six `ModCommand` fields unconditionally — deliberately
+  stricter than upstream `ModCommand::operator==` (which ignores vol/param when
+  commands are NONE) because the ticket requires byte-for-byte preservation even of
+  empty-command parameters. `ModCommand` has exactly these six data members.
+- The demo driver rides the test binary via the `OPENMPT_AI_DEMO_REPORT` env var, as
+  ticket AC 5 explicitly allows ("or test-fixture entry"); the guarded script reads
+  make an early test failure loud instead of confusing.
+
+Verification after fixes: `./build-local.ps1 -Test` — PASS, demo diff and proposal
+printed.
