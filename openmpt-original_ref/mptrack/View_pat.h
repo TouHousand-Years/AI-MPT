@@ -10,6 +10,7 @@
 
 
 #pragma once
+#include <optional>
 
 #include "openmpt/all/BuildSettings.hpp"
 
@@ -232,6 +233,7 @@ public:
 	int GetRowHeight() const { return m_szCell.cy; }
 	int GetSmoothScrollOffset() const;
 
+	std::optional<PatternRect> AISelection() const { return m_Selection.GetUpperLeft() == m_Selection.GetLowerRight() ? std::nullopt : std::optional<PatternRect>(m_Selection); }
 	PATTERNINDEX GetCurrentPattern() const { return m_nPattern; }
 	ROWINDEX GetCurrentRow() const { return m_Cursor.GetRow(); }
 	CHANNELINDEX GetCurrentChannel() const { return m_Cursor.GetChannel(); }
@@ -541,7 +543,7 @@ private:
 	ModCommand &GetModCommand(CSoundFile &sndFile, const PatternEditPos &pos);
 
 	// Returns true if pattern editing is enabled.
-	bool IsEditingEnabled() const { return m_Status[psRecordingEnabled]; }
+	bool IsEditingEnabled() const { return m_Status[psRecordingEnabled] && !GetDocument()->AIOccupied(); }
 
 	// Like IsEditingEnabled(), but shows some notification when editing is not enabled.
 	bool IsEditingEnabled_bmsg();

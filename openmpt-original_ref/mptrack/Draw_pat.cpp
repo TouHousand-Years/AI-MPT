@@ -887,6 +887,7 @@ void CViewPattern::InvalidatePianoRollPrototype()
 
 bool CViewPattern::TransposePianoRollPrototypeNote(int semitones)
 {
+	if(GetDocument()->AIOccupied()) return false;
 	CSoundFile *sndFile = GetSoundFile();
 	if(sndFile == nullptr || !sndFile->Patterns.IsValidPat(m_nPattern))
 		return false;

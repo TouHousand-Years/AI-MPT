@@ -2448,6 +2448,9 @@
     <ClCompile Include="..\..\src\openmpt\streamencoder\StreamEncoderVorbis.cpp" />
     <ClCompile Include="..\..\src\openmpt\streamencoder\StreamEncoderWAV.cpp" />
     <ClCompile Include="..\..\test\TestToolsLib.cpp" />
+    <ClCompile Include="..\..\mptrack\AIService.cpp" />
+    <ClCompile Include="..\..\mptrack\AIPattern.cpp" />
+    <ClCompile Include="..\..\test\mpt_tests_ai_pattern.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_base.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_binary.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_crc.cpp" />

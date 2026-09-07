@@ -9,6 +9,7 @@
 
 
 #include "stdafx.h"
+#include "AIService.h"
 #include "Mptrack.h"
 #include "AboutDialog.h"
 #include "AutoSaver.h"
@@ -1605,6 +1606,22 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 		return FALSE;
 	}
 
+	#ifdef ENABLE_TESTS
+	if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))
+	{
+		try
+		{
+			Test::AIPatternTests(fixture);
+			std::ofstream(_wgetenv(L"OPENMPT_AI_TEST_REPORT")) << "PASS\n";
+		} catch(const std::exception &error)
+		{
+			std::ofstream(_wgetenv(L"OPENMPT_AI_TEST_REPORT")) << "FAIL: " << error.what() << "\n";
+		}
+		return FALSE;
+	}
+#endif
+	AI::Start(*pMainFrame);
+	pMainFrame->GetMenu()->AppendMenu(MF_STRING, AI::ShowPanelCommand, _T("AI / MCP"));
 	pMainFrame->UpdateDocumentCount();
 	pMainFrame->ShowWindow(m_nCmdShow);
 	pMainFrame->UpdateWindow();
@@ -1680,6 +1697,12 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	return TRUE;
 }
 
+
+BOOL CTrackApp::PreTranslateMessage(MSG *message)
+{
+	if(AI::FilterInput(*message)) return TRUE;
+	return CWinApp::PreTranslateMessage(message);
+}
 
 BOOL CTrackApp::InitInstance()
 {

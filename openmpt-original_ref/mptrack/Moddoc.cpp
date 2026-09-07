@@ -9,6 +9,7 @@
 
 
 #include "stdafx.h"
+#include "AIService.h"
 #include "Moddoc.h"
 #include "ChannelManagerDlg.h"
 #include "Childfrm.h"
@@ -141,6 +142,8 @@ CModDoc::CModDoc()
 	, m_SampleUndo(*this)
 	, m_InstrumentUndo(*this)
 {
+	static std::atomic<uint64> nextDocument = 0;
+	m_aiIdentity = "document-" + std::to_string(++nextDocument);
 	// Set the creation date of this file (or the load time if we're loading an existing file)
 	m_creationTime = mpt::chrono::default_system_clock::now();
 
@@ -152,12 +155,14 @@ CModDoc::CModDoc()
 
 CModDoc::~CModDoc()
 {
+	AI::DocumentClosed(*this);
 	ClearLog();
 }
 
 
 void CModDoc::SetModified(bool modified)
 {
+	if(modified) ++m_aiRevision;
 	static_assert(sizeof(long) == sizeof(m_bModified));
 	m_modifiedAutosave = modified;
 	if(!!InterlockedExchange(reinterpret_cast<long *>(&m_bModified), modified ? TRUE : FALSE) != modified)

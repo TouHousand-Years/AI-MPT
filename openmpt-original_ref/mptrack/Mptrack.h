@@ -351,6 +351,7 @@ protected:
 	// ClassWizard generated virtual function overrides
 	//{{AFX_VIRTUAL(CTrackApp)
 	BOOL InitInstance() override;
+	BOOL PreTranslateMessage(MSG *message) override;
 	BOOL InitInstanceEarly(CMPTCommandLineInfo &cmdInfo);
 	BOOL InitInstanceLate(CMPTCommandLineInfo &cmdInfo);
 	BOOL InitInstanceImpl(CMPTCommandLineInfo &cmdInfo);

@@ -134,6 +134,9 @@ protected:
 	SplitKeyboardSettings m_SplitKeyboardSettings;	// this is maybe not the best place to keep them, but it should do the job
 	mpt::chrono::default_system_clock::time_point m_creationTime;
 
+	std::string m_aiIdentity;
+	std::atomic<bool> m_aiOccupied = false;
+	std::atomic<uint64> m_aiRevision = 0;
 	std::atomic<bool> m_modifiedAutosave = false; // Modified since last autosave?
 
 public:
@@ -162,6 +165,10 @@ protected: // create from serialization only
 // public members
 public:
 	CSoundFile &GetSoundFile() { return m_SndFile; }
+	const std::string &AIIdentity() const { return m_aiIdentity; }
+	bool AIOccupied() const { return m_aiOccupied; }
+	void SetAIOccupied(bool occupied) { m_aiOccupied = occupied; }
+	uint64 AIRevision() const { return m_aiRevision; }
 	const CSoundFile &GetSoundFile() const { return m_SndFile; }
 
 #if MPT_COMPILER_CLANG

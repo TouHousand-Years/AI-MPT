@@ -435,6 +435,7 @@ protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnRButtonDown(UINT, CPoint);
 	afx_msg void OnClose();
+	BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
 	afx_msg void OnTimer(UINT_PTR);
 	afx_msg LRESULT OnDPIChanged(WPARAM, LPARAM);
 

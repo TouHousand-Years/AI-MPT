@@ -9,6 +9,7 @@
 
 
 #include "stdafx.h"
+#include "AIService.h"
 #include "Mainfrm.h"
 #include "AdvancedConfigDlg.h"
 #include "AutoSaver.h"
@@ -280,6 +281,7 @@ void CMainFrame::Initialize()
 
 CMainFrame::~CMainFrame()
 {
+	AI::Stop();
 	CChannelManagerDlg::DestroySharedInstance();
 	m_metronomeMeasure.FreeSample();
 	m_metronomeBeat.FreeSample();
@@ -2223,6 +2225,13 @@ void CMainFrame::OnImportMidiLib()
 	EndWaitCursor();
 }
 
+
+BOOL CMainFrame::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	if(LOWORD(wParam) == AI::ShowPanelCommand) { AI::ShowPanel(); return TRUE; }
+	if(AI::BlockCommand(LOWORD(wParam))) return TRUE;
+	return CMDIFrameWnd::OnCommand(wParam, lParam);
+}
 
 void CMainFrame::OnTimer(UINT_PTR timerID)
 {

@@ -22,6 +22,9 @@ void PrintHeader();
 void PrintFooter();
 
 void DoTests();
+#ifdef MODPLUG_TRACKER
+void AIPatternTests(const CString &fixture);
+#endif
 
 } // namespace Test
 
