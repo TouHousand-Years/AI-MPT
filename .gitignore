@@ -1,3 +1,5 @@
 .scratch/ai-build.log
 .scratch/ai-native-test.txt
 .scratch/probe/
+.scratch/ai-test-bin/
+.scratch/ai-pattern-demo.json

@@ -21,6 +21,8 @@ public:
 	using Clock = std::chrono::steady_clock;
 	PatternCapability(CModDoc &document, PATTERNINDEX pattern, std::optional<PatternRect> selection);
 	~PatternCapability();
+	PatternCapability(const PatternCapability &) = delete;
+	PatternCapability &operator=(const PatternCapability &) = delete;
 	Json Call(const std::string &tool, const Json &arguments);
 	Json Apply(bool whole = true, bool simulateFailure = false);
 	Json Reject();
@@ -47,6 +49,7 @@ private:
 	CHANNELINDEX m_channels = 0;
 	unsigned m_timeout = 300;
 	bool m_retained = false, m_proposal = false, m_alwaysApprove = false;
+	bool m_ownsOccupancy = false, m_callActive = false;
 	Clock::time_point m_deadline;
 	std::string Signature() const;
 	Json Context(const std::vector<ModCommand> &cells, const Json &args) const;
@@ -54,6 +57,7 @@ private:
 	Json Diff(const std::vector<ModCommand> &before, const std::vector<ModCommand> &after) const;
 	Json Validate(const ModCommand &before, const ModCommand &after, ROWINDEX row) const;
 	void Capture();
+	Json Dispatch(const std::string &tool, const Json &arguments);
 };
 }
 OPENMPT_NAMESPACE_END

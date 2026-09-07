@@ -10,17 +10,23 @@ if($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
 if($Test) {
     $savedFixture = $env:OPENMPT_AI_TEST_FIXTURE
     $savedReport = $env:OPENMPT_AI_TEST_REPORT
+    $savedDemoReport = $env:OPENMPT_AI_DEMO_REPORT
     $testReport = Join-Path $projectRoot '.scratch\ai-native-test.txt'
+    $demoReport = Join-Path $projectRoot '.scratch\ai-pattern-demo.json'
     try {
         $env:OPENMPT_AI_TEST_FIXTURE = Join-Path $projectRoot 'test-fixtures\ai-collab-fixture.mptm'
         $env:OPENMPT_AI_TEST_REPORT = $testReport
+        $env:OPENMPT_AI_DEMO_REPORT = $demoReport
         if(Test-Path -LiteralPath $testReport) { Remove-Item -LiteralPath $testReport }
+        if(Test-Path -LiteralPath $demoReport) { Remove-Item -LiteralPath $demoReport }
         Start-Process -FilePath (Join-Path $projectRoot 'openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\OpenMPT.exe') -ArgumentList '/noSysCheck','/noTests','/noPlugins','/noDls' -WindowStyle Hidden -Wait
         $result = Get-Content -LiteralPath $testReport -Raw
         Write-Output $result
         if($result.Trim() -ne 'PASS') { throw 'Native capability tests failed.' }
+        Get-Content -LiteralPath $demoReport -Raw
     } finally {
         $env:OPENMPT_AI_TEST_FIXTURE = $savedFixture
         $env:OPENMPT_AI_TEST_REPORT = $savedReport
+        $env:OPENMPT_AI_DEMO_REPORT = $savedDemoReport
     }
 }

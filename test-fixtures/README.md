@@ -77,6 +77,16 @@ rendered-audio ones: when `openmpt123.exe` from the local build is available,
 the validator renders the module and checks duration, audibility, and the
 tuning of both states.
 
+## Pattern capability fixture driver
+
+From the repository root, the native fixture entry builds OpenMPT, runs the
+five-tool Pattern capability tests against this module, and prints the
+accumulated two-voice candidate diff and immutable final proposal:
+
+```powershell
+.\build-local.ps1 -Test
+```
+
 ## Manual verification checklist (owner)
 
 1. Open `ai-collab-fixture.mptm` in the local OpenMPT build — no warnings,

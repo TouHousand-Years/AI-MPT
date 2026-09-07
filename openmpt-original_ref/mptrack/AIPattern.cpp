@@ -11,16 +11,44 @@
 OPENMPT_NAMESPACE_BEGIN
 namespace AI
 {
+static Json WithEndingReminder(Json result)
+{
+	result["ending_reminder"] = "When finished, handoff_for_review freezes edits; abort_session discards them; release_occupancy ends a read-only session.";
+	return result;
+}
 Json Failure(const char *code, const char *reason, const char *layer)
 {
-	return {{"ok", false}, {"error", {{"layer", layer}, {"code", code}, {"reason", reason}}}};
+	return WithEndingReminder({{"ok", false}, {"error", {{"layer", layer}, {"code", code}, {"reason", reason}}}});
 }
 
 static std::string Utf8(const mpt::ustring &value) { return mpt::ToCharset(mpt::Charset::UTF8, value); }
+static const char *NoteKind(ModCommand::NOTE note)
+{
+	if(note == NOTE_NONE) return "empty";
+	if(ModCommand::IsNote(note)) return "pitched";
+	switch(note)
+	{
+	case NOTE_KEYOFF: return "note_off";
+	case NOTE_NOTECUT: return "note_cut";
+	case NOTE_FADE: return "note_fade";
+	case NOTE_PC: return "plugin_control";
+	case NOTE_PCS: return "plugin_control_smooth";
+	default: return "special";
+	}
+}
 static Json Raw(const ModCommand &cell)
 {
 	return {{"note", cell.note}, {"instrument", cell.instr}, {"volume_command", cell.volcmd},
 		{"volume", cell.vol}, {"effect_command", cell.command}, {"effect_parameter", cell.param}};
+}
+static bool SameRaw(const ModCommand &a, const ModCommand &b)
+{
+	return a.note == b.note && a.instr == b.instr && a.volcmd == b.volcmd && a.vol == b.vol
+		&& a.command == b.command && a.param == b.param;
+}
+static bool SameCells(const std::vector<ModCommand> &a, const std::vector<ModCommand> &b)
+{
+	return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), SameRaw);
 }
 static int Integer(const Json &value, int low, int high)
 {
@@ -40,7 +68,8 @@ void PatternCapability::Configure(unsigned seconds, bool alwaysApprove)
 void PatternCapability::ForceRelease()
 {
 	m_retained = false;
-	m_doc.SetAIOccupied(false);
+	if(m_ownsOccupancy) m_doc.SetAIOccupied(false);
+	m_ownsOccupancy = false;
 	m_token.clear();
 	m_pending.reset();
 	if(!m_proposal) { m_candidate.clear(); m_baseline.clear(); }
@@ -120,8 +149,8 @@ Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json
 		for(int c = channel; c < channel + channels; ++c)
 		{
 			const auto &cell = cells[size_t(r) * m_channels + c];
-			if(cell == ModCommand{}) continue;
-			sparse.push_back({{"row", r}, {"channel", c}, {"raw", Raw(cell)},
+			if(SameRaw(cell, ModCommand{})) continue;
+			sparse.push_back({{"row", r}, {"channel", c}, {"raw", Raw(cell)}, {"note_kind", NoteKind(cell.note)},
 				{"note_name", Utf8(sf.GetNoteName(cell.note, cell.instr))}, {"volume_command_name", SemanticName(cell.volcmd)}, {"effect_command_name", SemanticName(cell.command)}, {"instrument_reference", cell.instr}});
 		}
 	for(INSTRUMENTINDEX i = 1; i <= sf.GetNumInstruments(); ++i)
@@ -136,16 +165,38 @@ Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json
 			{"tempo_mode", int(sf.m_nTempoMode)}, {"rows_per_beat", pattern.GetOverrideSignature() ? pattern.GetRowsPerBeat() : sf.m_nDefaultRowsPerBeat},
 			{"rows_per_measure", pattern.GetOverrideSignature() ? pattern.GetRowsPerMeasure() : sf.m_nDefaultRowsPerMeasure}}},
 		{"format", {{"name", spec.fileExtension}, {"note_min", spec.noteMin}, {"note_max", spec.noteMax}, {"note_off", spec.hasNoteOff},
-			{"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}}, {"instruments", instruments}, {"samples", samples}};
+			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? 64 : 0}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
+		{"instruments", instruments}, {"samples", samples}};
 }
 
 Json PatternCapability::Call(const std::string &tool, const Json &args)
 {
 	if(GetCurrentThreadId() != m_thread) return Failure("owningThreadRequired", "Call on the document owning thread");
+	if(m_callActive) return Failure("busy", "Another capability call is executing");
+	m_callActive = true;
+	struct EndCall
+	{
+		PatternCapability &capability;
+		~EndCall()
+		{
+			capability.m_callActive = false;
+			if(!capability.m_retained) capability.ForceRelease();
+		}
+	} end{*this};
+	return WithEndingReminder(Dispatch(tool, args));
+}
+
+Json PatternCapability::Dispatch(const std::string &tool, const Json &args)
+{
 	Tick();
 	try
 	{
 		if(!args.is_object()) return Failure("schemaFailure", "Arguments must be an object");
+		if(tool != "get_pattern_context" && tool != "replace_pattern_segment" && tool != "handoff_for_review"
+			&& tool != "abort_session" && tool != "release_occupancy") return Failure("unsupported", "Unknown Pattern tool");
+		if(args.contains("occupy") && !args.at("occupy").is_boolean()) return Failure("schemaFailure", "occupy must be boolean");
+		if(args.contains("pattern") && (!args.at("pattern").is_number_integer() || args.at("pattern").get<int>() != static_cast<int>(m_pattern)))
+			return Failure("boundPatternViolation", "A session cannot read or write another Pattern");
 		if(m_pending) return Failure("approvalPending", "Resolve the pending expansion first");
 		if(args.contains("session"))
 		{
@@ -155,6 +206,8 @@ Json PatternCapability::Call(const std::string &tool, const Json &args)
 		else
 		{
 			if(m_retained || m_proposal || m_doc.AIOccupied()) return Failure("busy", "Finish the existing session or proposal first");
+			m_doc.SetAIOccupied(true);
+			m_ownsOccupancy = true;
 			Capture();
 		}
 		if(tool == "get_pattern_context")
@@ -171,7 +224,7 @@ Json PatternCapability::Call(const std::string &tool, const Json &args)
 		}
 		if(tool == "abort_session" || tool == "release_occupancy")
 		{
-			if(tool == "release_occupancy" && m_candidate != m_baseline) return Failure("candidateExists", "Handoff or abort edited candidates");
+			if(tool == "release_occupancy" && !SameCells(m_candidate, m_baseline)) return Failure("candidateExists", "Handoff or abort edited candidates");
 			ForceRelease();
 			return {{"ok", true}};
 		}
@@ -194,7 +247,7 @@ Json PatternCapability::Diff(const std::vector<ModCommand> &before, const std::v
 {
 	Json result = Json::array();
 	for(size_t i = 0; i < before.size(); ++i)
-		if(before[i] != after[i]) result.push_back({{"row", i / m_channels}, {"channel", i % m_channels}, {"before", Raw(before[i])}, {"after", Raw(after[i])}});
+		if(!SameRaw(before[i], after[i])) result.push_back({{"row", i / m_channels}, {"channel", i % m_channels}, {"before", Raw(before[i])}, {"after", Raw(after[i])}});
 	return result;
 }
 
@@ -210,12 +263,15 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 		result["error"]["value"] = value;
 		return result;
 	};
-	if(before == after) return {{"ok", true}};
+	if(SameRaw(before, after)) return {{"ok", true}};
 	if(before.IsPcNote()) return error("note", after.note, "PC/PCS cells must be preserved byte-for-byte");
 	const bool supportedBefore = before.note == NOTE_NONE || before.IsNote() || before.note == NOTE_KEYOFF;
-	if(!supportedBefore && after.note != before.note) return error("note", after.note, "Preserve unsupported special notes exactly");
-	if(after.note != before.note && after.note != NOTE_NONE && ((!after.IsNote() && after.note != NOTE_KEYOFF) || !spec.HasNote(after.note)))
-		return error("note", after.note, "Only format-supported pitched notes, empty notes and note-offs can be written");
+	if(!supportedBefore) return error("note", after.note, "Preserve unsupported special-note cells byte-for-byte");
+	if(after.note != before.note)
+	{
+		const bool validNote = after.note == NOTE_NONE || (after.IsNote() && spec.HasNote(after.note)) || (after.note == NOTE_KEYOFF && spec.hasNoteOff);
+		if(!validNote) return error("note", after.note, "Only format-supported pitched notes, empty notes and note-offs can be written");
+	}
 	if(after.instr != before.instr && after.instr && (sf.GetNumInstruments() ? (after.instr > sf.GetNumInstruments() || !sf.Instruments[after.instr]) : after.instr > sf.GetNumSamples()))
 		return error("instrument", after.instr, "Instrument/sample reference does not exist");
 	if(after.command != before.command || after.param != before.param) return error("effect_command", after.command, "Preserve effect command and parameter exactly");
@@ -276,8 +332,8 @@ Json PatternCapability::Replace(const Json &args, bool approved)
 		auto validation = Validate(m_candidate[size_t(first + i) * m_channels + channel], desired[i], static_cast<ROWINDEX>(first + i));
 		if(!validation["ok"].get<bool>()) return validation;
 	}
-	const bool expansion = first < m_envelope.GetStartRow() || first + count - 1 > m_envelope.GetEndRow()
-		|| channel < m_envelope.GetStartChannel() || channel > m_envelope.GetEndChannel();
+	const bool expansion = first < static_cast<int>(m_envelope.GetStartRow()) || first + count - 1 > static_cast<int>(m_envelope.GetEndRow())
+		|| channel < static_cast<int>(m_envelope.GetStartChannel()) || channel > static_cast<int>(m_envelope.GetEndChannel());
 	if(expansion && !approved && !m_alwaysApprove)
 	{
 		m_pending = args;
@@ -289,12 +345,12 @@ Json PatternCapability::Replace(const Json &args, bool approved)
 	{
 		const size_t offset = size_t(first + i) * m_channels + channel;
 		cells.push_back({{"row", first + i}, {"cell", Raw(desired[i])}});
-		if(candidate[offset] != desired[i]) diff.push_back({{"row", first + i}, {"channel", channel}, {"before", Raw(candidate[offset])}, {"after", Raw(desired[i])}});
+		if(!SameRaw(candidate[offset], desired[i])) diff.push_back({{"row", first + i}, {"channel", channel}, {"before", Raw(candidate[offset])}, {"after", Raw(desired[i])}});
 		candidate[offset] = desired[i];
 	}
 	Json result{{"ok", true}, {"cells", cells}, {"diff", diff}};
-	if(expansion) m_envelope = PatternRect(PatternCursor(static_cast<ROWINDEX>(std::min<int>(first, m_envelope.GetStartRow())), static_cast<CHANNELINDEX>(std::min<int>(channel, m_envelope.GetStartChannel()))),
-		PatternCursor(static_cast<ROWINDEX>(std::max<int>(first + count - 1, m_envelope.GetEndRow())), static_cast<CHANNELINDEX>(std::max<int>(channel, m_envelope.GetEndChannel())), PatternCursor::lastColumn));
+	if(expansion) m_envelope = PatternRect(PatternCursor(static_cast<ROWINDEX>(std::min(first, static_cast<int>(m_envelope.GetStartRow()))), static_cast<CHANNELINDEX>(std::min(channel, static_cast<int>(m_envelope.GetStartChannel())))),
+		PatternCursor(static_cast<ROWINDEX>(std::max(first + count - 1, static_cast<int>(m_envelope.GetEndRow()))), static_cast<CHANNELINDEX>(std::max(channel, static_cast<int>(m_envelope.GetEndChannel()))), PatternCursor::lastColumn));
 	m_candidate.swap(candidate);
 	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
 	return result;
@@ -309,7 +365,7 @@ Json PatternCapability::ResolveExpansion(bool approve)
 	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
 	if(Signature() != m_signature) { ForceRelease(); return Failure("stale", "Dependencies changed while waiting"); }
 	if(!approve) return Failure("rangeRejected", "Owner declined the range expansion");
-	return Replace(args, true);
+	return WithEndingReminder(Replace(args, true));
 }
 
 Json PatternCapability::ExpansionRange() const
@@ -349,7 +405,7 @@ Json PatternCapability::Apply(bool whole, bool simulateFailure)
 		if(!result["ok"].get<bool>()) return result;
 	}
 	if(simulateFailure) return Failure("commitFailed", "Simulated precommit allocation failure");
-	if(m_baseline == m_candidate) return Failure("emptyProposal", "Proposal has no changes");
+	if(SameCells(m_baseline, m_candidate)) return Failure("emptyProposal", "Proposal has no changes");
 	// Everything that can allocate for our result happens before native Undo preparation.
 	Json result{{"ok", true}};
 	if(!m_doc.GetPatternUndo().PrepareUndo(m_pattern, 0, 0, m_channels, m_rows, "Apply AI proposal"))

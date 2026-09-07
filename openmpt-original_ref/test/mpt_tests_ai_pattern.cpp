@@ -3,6 +3,7 @@
 #include "../mptrack/AIPattern.h"
 #include "../mptrack/Mptrack.h"
 #include "../mptrack/Moddoc.h"
+#include <fstream>
 #include <stdexcept>
 #include <thread>
 
@@ -25,6 +26,19 @@ void AIPatternTests(const CString &fixture)
 	auto *doc = static_cast<CModDoc *>(theApp.OpenDocumentFile(fixture, FALSE));
 	if(!doc) throw std::runtime_error("Cannot load collaboration fixture");
 	{
+		AI::PatternCapability owner(*doc, 0, {});
+		const auto read = owner.Call("get_pattern_context", AI::Json::object());
+		Require(OK(read) && !doc->AIOccupied() && !read.contains("session"), "Short read releases occupancy");
+		Require(read.contains("ending_reminder"), "Every tool result explains session endings");
+		const auto token = owner.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		{
+			AI::PatternCapability other(*doc, 0, {});
+			Require(other.Call("get_pattern_context", AI::Json::object())["error"]["code"] == "busy", "Other facade cannot acquire occupied document");
+		}
+		Require(doc->AIOccupied(), "Destroying another facade must not release the owner's occupancy");
+		Require(OK(owner.Call("abort_session", {{"session", token}})), "Owner can end occupancy");
+	}
+	{
 		AI::PatternCapability capability(*doc, 0, {});
 		const auto result = capability.Call("get_pattern_context", {{"occupy", true}});
 		if(!result.at("ok").get<bool>() || result.at("context").at("rows") != 128)
@@ -42,21 +56,48 @@ void AIPatternTests(const CString &fixture)
 		capability.Call("abort_session", {{"session", token}});
 	}
 	{
+		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 1), PatternCursor(7, 1, PatternCursor::lastColumn)));
+		const auto read = cap.Call("get_pattern_context", {{"occupy", true}});
+		const auto token = read.at("session");
+		const auto context = read.at("context");
+		Require(context["pattern"] == 0 && context["rows"] == 128 && context["channels"] == 4, "Fixture identity and dimensions");
+		Require(context["timing"]["default_tempo"] == 125 && context["timing"]["default_speed"] == 6
+			&& context["timing"]["rows_per_beat"] == 4 && context["timing"]["rows_per_measure"] == 16, "Fixture timing");
+		Require(context["format"]["name"] == "mptm" && context["format"]["volume_max"] == 64, "Format write limits");
+		Require(context["instruments"].size() == 3 && context["samples"].size() == 3, "Existing resources summarized");
+		Require(context["cells"].size() > 0 && context["cells"][0]["note_kind"] == "pitched", "Sparse semantic cells");
+		const AI::Json range{{"first_row", 0}, {"row_count", 8}, {"first_channel", 0}, {"channel_count", 1}};
+		const auto narrowed = cap.Call("get_pattern_context", {{"session", token}, {"range", range}});
+		Require(OK(narrowed) && narrowed["context"]["range"] == range && !narrowed["context"]["cells"].empty(), "Reads may narrow outside write envelope");
+		for(const auto &entry : narrowed["context"]["cells"])
+			Require(entry["row"] < 8 && entry["channel"] == 0 && entry["raw"].size() == 6, "Exact sparse range with complete raw cells");
+		Require(!OK(cap.Call("get_pattern_context", {{"session", token}, {"pattern", 1}})), "Read cannot select another Pattern");
+		Require(doc->AIOccupied(), "Omitting occupy never demotes retained occupancy");
+		cap.ForceRelease();
+	}
+	{
 		auto &sf = doc->GetSoundFile();
 		const auto original = *sf.Patterns[0].GetpModCommand(0, 1);
 		AI::PatternCapability cap(*doc, 0, {});
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(doc->AIOccupied(), "Retained read locks the document");
+		Require(doc->GetPatternUndo().Undo() == PATTERNINDEX_INVALID, "Native Undo is blocked during retained occupancy");
 		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 1, 49))), "First voice");
 		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 2, 53))), "Second voice");
 		const auto beforeFailure = cap.Call("get_pattern_context", {{"session", token}}).at("context");
-		auto invalid = Segment(token, 1, 60); invalid["cells"][0]["cell"]["volume"] = 65;
+		auto invalid = Segment(token, 1, 60);
+		invalid["cells"].push_back({{"row", 1}, {"cell", Cell(62, 2, 65)}});
 		auto failure = cap.Call("replace_pattern_segment", invalid);
-		Require(!OK(failure) && failure["error"]["row"] == 0 && failure["error"]["field"] == "volume", "Typed invalid volume");
+		Require(!OK(failure) && failure["error"]["row"] == 1 && failure["error"]["field"] == "volume"
+			&& failure["error"]["value"] == 65 && failure["error"]["reason"].is_string(), "Typed invalid volume");
 		Require(cap.Call("get_pattern_context", {{"session", token}}).at("context") == beforeFailure, "Failed call leaves candidate unchanged");
 		Require(!OK(cap.Call("release_occupancy", {{"session", token}})), "Edited candidate cannot be released");
-		Require(OK(cap.Call("handoff_for_review", {{"session", token}})) && !doc->AIOccupied(), "Handoff freezes and releases");
-		Require(cap.Review()["diff"].size() == 2, "Multi-voice calls normalize to two final cells");
+		const auto handoff = cap.Call("handoff_for_review", {{"session", token}});
+		Require(OK(handoff) && !doc->AIOccupied(), "Handoff freezes and releases");
+		const auto proposal = cap.Review();
+		Require(handoff["diff"].size() == 2 && proposal["diff"] == handoff["diff"], "Multi-voice calls normalize to two final cells");
+		if(const wchar_t *demo = _wgetenv(L"OPENMPT_AI_DEMO_REPORT"))
+			std::ofstream(demo) << AI::Json{{"accumulated_candidate_diff", handoff["diff"]}, {"final_proposal", proposal}}.dump(2) << '\n';
 		const auto revision = doc->AIRevision();
 		const auto undoName = doc->GetPatternUndo().GetUndoName();
 		Require(!OK(cap.Apply(false)), "Partial acceptance unsupported");
@@ -75,6 +116,7 @@ void AIPatternTests(const CString &fixture)
 		const auto revisionBeforeReject = doc->AIRevision();
 		Require(OK(cap.Reject()) && doc->AIRevision() == revisionBeforeReject && doc->GetPatternUndo().CanRedo(), "Reject preserves revision and redo history");
 		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(doc->GetPatternUndo().Redo() == PATTERNINDEX_INVALID && doc->GetPatternUndo().CanRedo(), "Native Redo is blocked during retained occupancy");
 		cap.Call("replace_pattern_segment", Segment(token, 1, 50));
 		cap.Call("handoff_for_review", {{"session", token}});
 		const auto saved = *sf.Patterns[0].GetpModCommand(0, 0);
@@ -92,8 +134,13 @@ void AIPatternTests(const CString &fixture)
 		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		cap.Tick(AI::PatternCapability::Clock::now() + std::chrono::seconds(301));
 		Require(cap.Call("get_pattern_context", {{"session", token}})["error"]["code"] == "occupancyLost", "Timeout invalidates token");
-		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session"); cap.ForceRelease();
+		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 1, 55))), "Candidate exists before human release");
+		cap.ForceRelease();
 		Require(!doc->AIOccupied() && !OK(cap.Call("get_pattern_context", {{"session", token}})), "Human release invalidates token");
+		const AI::Json releasedRange{{"first_row", 0}, {"row_count", 1}, {"first_channel", 1}, {"channel_count", 1}};
+		const auto afterRelease = cap.Call("get_pattern_context", {{"range", releasedRange}});
+		Require(afterRelease["context"]["cells"].empty(), "Human release discards the candidate");
 		AI::Json wrongThread;
 		std::thread worker([&] { wrongThread = cap.Call("get_pattern_context", AI::Json::object()); }); worker.join();
 		Require(wrongThread["error"]["code"] == "owningThreadRequired", "Worker thread cannot access model");
@@ -112,11 +159,48 @@ void AIPatternTests(const CString &fixture)
 		cap.Call("abort_session", {{"session", token}});
 	}
 	{
+		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 0), PatternCursor(7, 0, PatternCursor::lastColumn)));
+		cap.Configure(300, true);
+		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		const auto expanded = cap.Call("replace_pattern_segment", Segment(token, 1, 49));
+		Require(OK(expanded) && !expanded.contains("pending_approval"), "Always-approve preference expands without a prompt");
+		cap.Call("abort_session", {{"session", token}});
+	}
+	{
+		auto &cell = *doc->GetSoundFile().Patterns[0].GetpModCommand(0, 1);
+		const auto saved = cell; cell.command = CMD_TEMPO; cell.param = 125;
+		AI::PatternCapability cap(*doc, 0, {});
+		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		auto besideEffect = Segment(token, 1, 49);
+		besideEffect["cells"][0]["cell"]["effect_command"] = CMD_TEMPO;
+		besideEffect["cells"][0]["cell"]["effect_parameter"] = 125;
+		Require(OK(cap.Call("replace_pattern_segment", besideEffect)), "A pitched note may change beside a byte-preserved effect");
+		cap.ForceRelease(); cell = saved;
+	}
+	{
+		auto &cell = *doc->GetSoundFile().Patterns[0].GetpModCommand(0, 1);
+		const auto saved = cell; cell.param = 125;
+		AI::PatternCapability cap(*doc, 0, {});
+		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(!OK(cap.Call("replace_pattern_segment", Segment(token, 1, 49))), "Raw effect parameter must be preserved even when its command is empty");
+		cap.ForceRelease(); cell = saved;
+	}
+	{
 		auto &cell = *doc->GetSoundFile().Patterns[0].GetpModCommand(0, 1);
 		const auto saved = cell; cell.note = NOTE_PC; cell.command = CMD_TEMPO; cell.param = 123;
 		AI::PatternCapability cap(*doc, 0, {});
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(!OK(cap.Call("replace_pattern_segment", Segment(token, 1, 49))), "Unsupported PC content cannot be clobbered");
+		cap.ForceRelease(); cell = saved;
+	}
+	{
+		auto &cell = *doc->GetSoundFile().Patterns[0].GetpModCommand(0, 1);
+		const auto saved = cell; cell.note = NOTE_NOTECUT; cell.instr = 2;
+		AI::PatternCapability cap(*doc, 0, {});
+		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		auto changedSpecial = Segment(token, 1, NOTE_NOTECUT);
+		changedSpecial["cells"][0]["cell"]["instrument"] = 1;
+		Require(!OK(cap.Call("replace_pattern_segment", changedSpecial)), "Unsupported special-note cell must remain byte-for-byte identical");
 		cap.ForceRelease(); cell = saved;
 	}
 	doc->SetModified(false);
