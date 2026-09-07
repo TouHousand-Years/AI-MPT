@@ -1,6 +1,11 @@
 #pragma once
+#include "../soundlib/ModCommand.h"
+
+OPENMPT_NAMESPACE_BEGIN
+namespace AI
+{
 // Stable Score Context command names corresponding to native Tracker enums.
-static const char *SemanticName(VolumeCommand command)
+inline const char *SemanticName(VolumeCommand command)
 {
 	switch(command)
 	{
@@ -23,7 +28,7 @@ static const char *SemanticName(VolumeCommand command)
 	default: return "unknown";
 	}
 }
-static const char *SemanticName(EffectCommand command)
+inline const char *SemanticName(EffectCommand command)
 {
 	switch(command)
 	{
@@ -88,3 +93,5 @@ static const char *SemanticName(EffectCommand command)
 	default: return "unknown";
 	}
 }
+}
+OPENMPT_NAMESPACE_END

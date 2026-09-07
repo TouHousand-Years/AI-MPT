@@ -334,7 +334,6 @@ public:
 				CString line; line.Format(_T("Row %03d Ch %02d  |  %s  ->  %s  |  current %s"), row, channel + 1,
 					mpt::ToCString(sf.GetNoteName(cell["before"]["note"].get<uint8>(), cell["before"]["instrument"].get<uint8>())).GetString(),
 					mpt::ToCString(sf.GetNoteName(cell["after"]["note"].get<uint8>(), cell["after"]["instrument"].get<uint8>())).GetString(), liveName.GetString());
-				line += _T("  ") + Text(cell["before"].dump()) + _T(" -> ") + Text(cell["after"].dump());
 				evidence.AddString(line);
 			}
 		}
@@ -435,6 +434,9 @@ public:
 					) ShowWindow(SW_SHOWNOACTIVATE);
 					RefreshReview();
 				}
+			// Retained occupancy must stay visible without stealing keyboard focus.
+			if(capability && (capability->Occupied() || capability->HasProposal()))
+				SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			GetDlgItem(Approve)->EnableWindow(pending != nullptr); GetDlgItem(Decline)->EnableWindow(pending != nullptr);
 			GetDlgItem(Apply)->EnableWindow(capability && capability->HasProposal()); GetDlgItem(Reject)->EnableWindow(capability && capability->HasProposal());
 			InvalidateRect(CRect(12, 215, 1040, 260), FALSE);

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "AIPattern.h"
+#include "AICommandNames.h"
 #include "Moddoc.h"
 #include "UpdateHints.h"
 #include "../soundlib/mod_specifications.h"
@@ -10,7 +11,6 @@
 OPENMPT_NAMESPACE_BEGIN
 namespace AI
 {
-#include "AICommandNames.h"
 Json Failure(const char *code, const char *reason, const char *layer)
 {
 	return {{"ok", false}, {"error", {{"layer", layer}, {"code", code}, {"reason", reason}}}};

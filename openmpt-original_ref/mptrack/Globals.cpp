@@ -63,18 +63,26 @@ CModControlDlg::CModControlDlg(CModControlView &parent, CModDoc &document) : m_m
 }
 
 
+namespace
+{
 // Gate queued commands as well as direct input while the AI holds write authority.
+bool AIBlocksMessage(CModDoc *doc, UINT message, WPARAM wParam)
+{
+	if(!doc || !doc->AIOccupied()) return false;
+	if(message != WM_COMMAND && message != WM_MOD_KEYCOMMAND && message != WM_MOD_MIDIMSG && message != WM_MOD_DRAGONDROPPING) return false;
+	return message != WM_COMMAND || !AI::IsReadOnlyCommand(LOWORD(wParam));
+}
+}
+
 LRESULT CModControlDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
-	if(m_modDoc.AIOccupied() && (message == WM_COMMAND || message == WM_MOD_KEYCOMMAND || message == WM_MOD_MIDIMSG || message == WM_MOD_DRAGONDROPPING))
-		if(message != WM_COMMAND || !AI::IsReadOnlyCommand(LOWORD(wParam))) return 0;
+	if(AIBlocksMessage(&m_modDoc, message, wParam)) return 0;
 	return DialogBase::WindowProc(message, wParam, lParam);
 }
 
 LRESULT CModScrollView::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
 {
-	if(GetDocument() && GetDocument()->AIOccupied() && (message == WM_COMMAND || message == WM_MOD_KEYCOMMAND || message == WM_MOD_MIDIMSG || message == WM_MOD_DRAGONDROPPING))
-		if(message != WM_COMMAND || !AI::IsReadOnlyCommand(LOWORD(wParam))) return 0;
+	if(AIBlocksMessage(GetDocument(), message, wParam)) return 0;
 	return CScrollView::WindowProc(message, wParam, lParam);
 }
 

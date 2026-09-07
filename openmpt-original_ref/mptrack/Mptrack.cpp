@@ -1630,13 +1630,14 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	}
 	if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))
 	{
+		const wchar_t *report = _wgetenv(L"OPENMPT_AI_TEST_REPORT");
 		try
 		{
 			Test::AIPatternTests(fixture);
-			std::ofstream(_wgetenv(L"OPENMPT_AI_TEST_REPORT")) << "PASS\n";
+			if(report) std::ofstream(report) << "PASS\n";
 		} catch(const std::exception &error)
 		{
-			std::ofstream(_wgetenv(L"OPENMPT_AI_TEST_REPORT")) << "FAIL: " << error.what() << "\n";
+			if(report) std::ofstream(report) << "FAIL: " << error.what() << "\n";
 		}
 		return FALSE;
 	}
