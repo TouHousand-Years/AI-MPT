@@ -7,7 +7,7 @@ Label: ready-for-agent
 
 **Blocked by:** 29 (Pattern capability seam with the five Pattern-mode tools)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Acceptance criteria (demo to owner)
 
@@ -83,5 +83,40 @@ Design interpretations:
   pattern settles, because pattern-page initialization completes
   asynchronously and resets the current pattern once.
 
-Code review was intentionally not started, per the owner's requested pause
-point.
+## Code review — 2026-09-07
+
+Two-axis review (standards, spec) used `9d4fd4af1` as the fixed point. The
+standards axis found one documented brace-placement violation and two
+judgement-call smells. The spec axis found two real verification gaps and one
+unrelated build-script change; that build fix was already isolated in its own
+commit (`1958d76c2`).
+
+Fixes applied:
+
+- The broker's `direct:true` diagnostic now invokes the real issue-29
+  `PatternCapability::Call` facade from the broker thread. The facade's first
+  owning-thread guard returns `owningThreadRequired` before any document state
+  can be read; the old helper that merely manufactured the expected failure was
+  removed.
+- The native integration test now deterministically closes the explicitly
+  addressed document after its request has entered and left the broker queue,
+  but before dispatch. The owning-thread liveness recheck returns
+  `documentGone`, directly covering the queued-close requirement.
+- The changed `RefreshIdentity` block now follows OpenMPT's Allman brace style.
+- The diagnostic capability and its document identity are grouped into one
+  synchronized `ThreadProbe` state so their lifecycle invariant is explicit.
+
+Recorded review judgement:
+
+- The probe repeats a small connect/report/close lifecycle across commands.
+  This remains local, explicit owner-demo code with case-specific failure text;
+  extracting a generic connection runner would obscure those guided flows more
+  than it would simplify them.
+
+Verification after review fixes:
+
+- `python -m unittest discover -s sidecar` — 24 tests OK (2 opt-in skipped).
+- `OPENMPT_RUN_NATIVE_INTEGRATION=1 python -m unittest sidecar.test_native_integration`
+  — 2 tests OK, including real-facade off-thread rejection and queued-close
+  liveness.
+- `./build-local.ps1 -Test` — PASS with the two-voice demo report.

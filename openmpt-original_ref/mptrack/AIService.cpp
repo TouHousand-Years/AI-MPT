@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <deque>
 #include <fstream>
+#include <functional>
 
 OPENMPT_NAMESPACE_BEGIN
 namespace AI
@@ -80,17 +81,6 @@ struct Request
 	}
 };
 
-// A `direct:true` call envelope is never queued: the broker attempts the model
-// read on its own thread and the owning-thread guard rejects it. This makes the
-// issue-24 dispatch seam demonstrable over the real transport.
-Json DirectModelRead()
-{
-	if(!theApp.InGuiThread())
-		return Failure("owningThreadRequired", "Direct model read requires the document owning thread", "dispatch");
-	// Unreachable from the broker thread; queued requests go through Panel::Dispatch.
-	return Failure("internalError", "Direct read has no owning-thread path", "dispatch");
-}
-
 // The broker only handles bytes and envelopes. It has no document pointers.
 class Broker
 {
@@ -99,6 +89,7 @@ class Broker
 	std::mutex m_mutex;
 	std::deque<std::shared_ptr<Request>> m_queue;
 	std::wstring m_name;
+	std::function<Json()> m_directCall;
 	std::atomic<bool> m_running = false;
 	bool IO(HANDLE pipe, void *buffer, DWORD size, bool write)
 	{
@@ -209,7 +200,7 @@ class Broker
 					if(!attach && (attachedInstance.empty() || envelope["instance"] != attachedInstance || envelope["document"] != attachedDocument))
 						result = Failure("notAttached", "Explicit attachment required", "attachment");
 					else if(!attach && envelope.value("direct", false))
-						result = DirectModelRead();
+						result = m_directCall();
 					else
 					{
 						auto request = std::make_shared<Request>();
@@ -241,7 +232,11 @@ class Broker
 		CloseHandle(pipe);
 	}
 public:
-	Broker(std::wstring name) : m_name(std::move(name)) { m_worker = std::thread([this] { try { Run(); } catch(...) { m_running = false; } }); }
+	Broker(std::wstring name, std::function<Json()> directCall)
+		: m_name(std::move(name)), m_directCall(std::move(directCall))
+	{
+		m_worker = std::thread([this] { try { Run(); } catch(...) { m_running = false; } });
+	}
 	~Broker() { SetEvent(m_stop); if(m_worker.joinable()) m_worker.join(); CloseHandle(m_stop); }
 	bool Running() const { return m_running; }
 	std::shared_ptr<Request> Pop()
@@ -264,8 +259,15 @@ enum Control : UINT { Enable = 1, AlwaysApprove, Timeout, Apply, Reject, Release
 class Panel final : public CWnd
 {
 public:
+	struct ThreadProbe
+	{
+		std::unique_ptr<PatternCapability> capability;
+		CModDoc *document = nullptr;
+		std::mutex mutex;
+	};
 	std::unique_ptr<Broker> broker;
 	std::unique_ptr<PatternCapability> capability;
+	ThreadProbe threadProbe;
 	CModDoc *document = nullptr;
 	std::shared_ptr<Request> pending;
 	CButton enable, always;
@@ -287,6 +289,21 @@ public:
 	ULONGLONG tickTrace = 0;
 	PATTERNINDEX patternSettle = PATTERNINDEX_INVALID;
 #endif
+	std::unique_ptr<Broker> CreateBroker()
+	{
+		return std::make_unique<Broker>(pipe, [this]
+		{
+			std::lock_guard lock(threadProbe.mutex);
+			if(!threadProbe.capability)
+				return Failure("internalError", "No attached capability is available for the direct-call probe", "dispatch");
+			// This is the real issue-29 facade call. It must reject on its first
+			// owning-thread guard, before reading any document state.
+			auto result = threadProbe.capability->Call("get_pattern_context", Json::object());
+			if(!result.value("ok", false) && result["error"].value("code", "") == "owningThreadRequired")
+				result["error"]["layer"] = "dispatch";
+			return result;
+		});
+	}
 	Panel(CWnd &owner)
 	{
 		GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
@@ -315,12 +332,19 @@ public:
 		button(Reject, _T("Reject whole proposal"), CRect(830, 170, 1035, 204));
 		evidence.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, CRect(12, 265, 1040, 460), this, Evidence);
 		evidence.SetFont(CFont::FromHandle(static_cast<HFONT>(GetStockObject(ANSI_FIXED_FONT))));
-		if(enable.GetCheck()) broker = std::make_unique<Broker>(pipe);
+		if(enable.GetCheck()) broker = CreateBroker();
 		SetTimer(1, 100, nullptr);
 		RefreshIdentity();
 		TestTrace("panel: ctor done");
 	}
-	~Panel() { if(pending) pending->Complete(Failure("instanceGone", "Application stopping", "attachment")); capability.reset(); broker.reset(); }
+	~Panel()
+	{
+		if(pending) pending->Complete(Failure("instanceGone", "Application stopping", "attachment"));
+		broker.reset();
+		std::lock_guard lock(threadProbe.mutex);
+		threadProbe.capability.reset();
+		capability.reset();
+	}
 	void RefreshIdentity()
 	{
 		auto *active = CMainFrame::GetMainFrame()->GetActiveDoc();
@@ -333,7 +357,11 @@ public:
 		}
 		if(theApp.GetOpenDocuments().empty()) value += _T("\r\n  (none) Open a document and its Patterns tab.");
 		// Called from the timer pump: only rewrite the control when something changed.
-		if(value != identityText) { identityText = value; identity.SetWindowText(value); }
+		if(value != identityText)
+		{
+			identityText = value;
+			identity.SetWindowText(value);
+		}
 	}
 	void ReleaseNow()
 	{
@@ -347,7 +375,13 @@ public:
 		CModDoc *target = nullptr;
 		for(auto *doc : theApp.GetOpenDocuments()) if(envelope.at("document") == doc->AIIdentity()) { target = doc; break; }
 		if(!target) return Failure("documentGone", "Document lifetime ended", "attachment");
-		if(envelope.at("operation") == "attach") return {{"ok", true}};
+		if(envelope.at("operation") == "attach")
+		{
+			std::lock_guard lock(threadProbe.mutex);
+			threadProbe.capability = std::make_unique<PatternCapability>(*target, PATTERNINDEX_INVALID, std::nullopt);
+			threadProbe.document = target;
+			return {{"ok", true}};
+		}
 		if(envelope.at("operation") != "call") return Failure("schemaFailure", "Unknown operation", "transport");
 		const std::string tool = envelope.at("tool").get<std::string>();
 		const auto &args = envelope.at("arguments");
@@ -411,7 +445,7 @@ public:
 				theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysApprove"), always.GetCheck() != 0);
 				theApp.GetSettings().Write<unsigned>(U_("AI/MCP"), U_("TimeoutSeconds"), seconds);
 				if(!enable.GetCheck()) { ReleaseNow(); broker.reset(); }
-				else if(!broker) broker = std::make_unique<Broker>(pipe);
+				else if(!broker) broker = CreateBroker();
 				if(capability) capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
 			}
 			if((id == Approve || id == Decline) && pending && capability)
@@ -501,7 +535,24 @@ public:
 				if(auto request = broker->Pop())
 				{
 					Json result;
-					try { result = Dispatch(request->envelope); }
+					try
+					{
+#ifdef ENABLE_TESTS
+						// Deterministically exercise the dispatch-time liveness recheck:
+						// the transport request has already been queued and popped before
+						// the explicitly addressed document is closed here.
+						if(request->envelope.value("test_close_before_dispatch", false))
+						{
+							for(auto *doc : theApp.GetOpenDocuments())
+								if(request->envelope.at("document") == doc->AIIdentity())
+								{
+									doc->OnCloseDocument();
+									break;
+								}
+						}
+#endif
+						result = Dispatch(request->envelope);
+					}
 					catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid request", "transport"); }
 					catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }
 					if(result.value("pending_approval", false)) pending = request;
@@ -610,7 +661,7 @@ void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 	panel->testDeadline = GetTickCount64() + 60000;
 	panel->document = &doc;
 	panel->enable.SetCheck(BST_CHECKED);
-	if(!panel->broker) panel->broker = std::make_unique<Broker>(panel->pipe);
+	if(!panel->broker) panel->broker = panel->CreateBroker();
 	TestTrace("host: started, broker=" + std::string(panel->broker && panel->broker->Running() ? "1" : "0"));
 	doc.ActivateView(IDD_CONTROL_PATTERNS, 0);
 	TestTrace(std::string("host: activated, view=") + (PatternView(doc) ? "1" : "0"));
@@ -634,6 +685,15 @@ void Stop() { panel.reset(); }
 void ShowPanel() { if(panel) { panel->RefreshIdentity(); panel->ShowWindow(SW_SHOW); panel->SetForegroundWindow(); } }
 void DocumentClosed(CModDoc &doc)
 {
+	if(panel)
+	{
+		std::lock_guard lock(panel->threadProbe.mutex);
+		if(panel->threadProbe.document == &doc)
+		{
+			panel->threadProbe.capability.reset();
+			panel->threadProbe.document = nullptr;
+		}
+	}
 	if(panel && panel->document == &doc) { if(panel->pending) { panel->pending->Complete(Failure("documentGone", "Document lifetime ended", "attachment")); panel->pending.reset(); } panel->ReleaseNow(); panel->capability.reset(); panel->document = nullptr; panel->RefreshReview(); }
 }
 

@@ -154,9 +154,17 @@ class NativeIntegrationTests(unittest.TestCase):
                 result = transact(client, "call", tool="get_pattern_context", arguments={})
                 self.assertTrue(result.get("ok"), result)
                 self.assertIn("context", result)
+
+                # 7. The request is already in the broker queue when the test
+                #    hook closes its explicitly addressed document. Dispatch
+                #    must recheck lifetime and refuse the now-stale identity.
+                result = transact(client, "call", tool="get_pattern_context", arguments={},
+                                  test_close_before_dispatch=True)
+                self.assertEqual(result["error"]["code"], "documentGone")
+                self.assertEqual(result["error"]["layer"], "attachment")
                 client.close()
 
-                # 7. App exit: the connection dies and maps to instanceGone.
+                # 8. App exit: the connection dies and maps to instanceGone.
                 stop.touch()
                 deadline = time.monotonic() + 15
                 while app.poll() is None and time.monotonic() < deadline:
