@@ -49,6 +49,7 @@ protected:
 public:
 	CModControlDlg(CModControlView &parent, CModDoc &document);
 	~CModControlDlg() override;
+	LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam) override;
 	
 public:
 	void SetViewWnd(HWND hwndView) { m_hWndView = hwndView; }
@@ -202,6 +203,7 @@ public:
 	DECLARE_SERIAL(CModScrollView)
 	CModScrollView() = default;
 	virtual ~CModScrollView() = default;
+	LRESULT WindowProc(UINT message, WPARAM wParam, LPARAM lParam) override;
 
 public:
 	CModDoc *GetDocument() const noexcept;

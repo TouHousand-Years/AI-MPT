@@ -10,6 +10,10 @@ void Stop();
 void ShowPanel();
 void DocumentClosed(CModDoc &document);
 bool FilterInput(MSG &message);
+bool IsReadOnlyCommand(UINT command);
 bool BlockCommand(UINT command);
+#ifdef ENABLE_TESTS
+void IntegrationHost(CWnd &owner, CModDoc &document, const wchar_t *report);
+#endif
 }
 OPENMPT_NAMESPACE_END

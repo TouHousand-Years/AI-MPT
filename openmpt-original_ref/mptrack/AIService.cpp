@@ -14,6 +14,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <fstream>
 
 OPENMPT_NAMESPACE_BEGIN
 namespace AI
@@ -200,8 +201,14 @@ public:
 	std::wstring pipe;
 	Json review;
 	unsigned seconds = 300;
-	bool expanded = false;
+	bool selecting = false, keyboardSelecting = false;
+	PatternCursor selectionAnchor;
+	uint64 displayedRevision = 0;
 	CString lastMessage;
+#ifdef ENABLE_TESTS
+	std::wstring testReport;
+	ULONGLONG testDeadline = 0;
+#endif
 	Panel(CWnd &owner)
 	{
 		GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
@@ -274,6 +281,16 @@ public:
 		capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
 		return capability->Call(tool, args);
 	}
+	std::optional<ModCommand> CurrentCell(const Json &cell) const
+	{
+		if(!document || !capability) return {};
+		const auto &sf = document->GetSoundFile();
+		if(!sf.Patterns.IsValidPat(capability->Pattern())) return {};
+		const auto row = cell["row"].get<ROWINDEX>();
+		const auto channel = cell["channel"].get<CHANNELINDEX>();
+		if(row >= sf.Patterns[capability->Pattern()].GetNumRows() || channel >= sf.GetNumChannels()) return {};
+		return *sf.Patterns[capability->Pattern()].GetpModCommand(row, channel);
+	}
 	void RefreshReview()
 	{
 		review = capability && capability->HasProposal() ? capability->Review() : Json{};
@@ -284,10 +301,11 @@ public:
 			{
 				const int row = cell.at("row").get<int>(), channel = cell.at("channel").get<int>();
 				const auto &sf = document->GetSoundFile();
-				const auto &live = *sf.Patterns[capability->Pattern()].GetpModCommand(static_cast<ROWINDEX>(row), static_cast<CHANNELINDEX>(channel));
+				const auto live = CurrentCell(cell);
+				const CString liveName = live ? mpt::ToCString(sf.GetNoteName(live->note, live->instr)) : CString(_T("unavailable"));
 				CString line; line.Format(_T("Row %03d Ch %02d  |  %s  ->  %s  |  current %s"), row, channel + 1,
 					mpt::ToCString(sf.GetNoteName(cell["before"]["note"].get<uint8>(), cell["before"]["instrument"].get<uint8>())).GetString(),
-					mpt::ToCString(sf.GetNoteName(cell["after"]["note"].get<uint8>(), cell["after"]["instrument"].get<uint8>())).GetString(), mpt::ToCString(sf.GetNoteName(live.note, live.instr)).GetString());
+					mpt::ToCString(sf.GetNoteName(cell["after"]["note"].get<uint8>(), cell["after"]["instrument"].get<uint8>())).GetString(), liveName.GetString());
 				line += _T("  ") + Text(cell["before"].dump()) + _T(" -> ") + Text(cell["after"].dump());
 				evidence.AddString(line);
 			}
@@ -340,7 +358,28 @@ public:
 	{
 		try
 		{
+#ifdef ENABLE_TESTS
+			if(testDeadline)
+			{
+				if(!testReport.empty()) std::ofstream(testReport + L".trace") << "timer broker=" << bool(broker && broker->Running()) << " view=" << bool(document && PatternView(*document));
+				const wchar_t *stop = _wgetenv(L"OPENMPT_AI_STOP_FILE");
+				if(GetTickCount64() >= testDeadline || (stop && GetFileAttributesW(stop) != INVALID_FILE_ATTRIBUTES))
+				{
+					ReleaseNow(); CMainFrame::GetMainFrame()->PostMessage(WM_CLOSE); return;
+				}
+				if(!testReport.empty() && document && broker && broker->Running())
+					if(auto *view = PatternView(*document))
+					{
+						const wchar_t *pattern = _wgetenv(L"OPENMPT_AI_PATTERN");
+						view->SetCurrentPattern(pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0);
+						Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
+						std::ofstream(testReport) << info.dump(); testReport.clear();
+					}
+			}
+#endif
 			if(capability) capability->Tick();
+			if(capability && capability->Occupied() && IsIconic()) ShowWindow(SW_SHOWNOACTIVATE);
+			if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
 			if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
 			if(broker && !pending)
 				if(auto request = broker->Pop())
@@ -351,7 +390,11 @@ public:
 					catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }
 					if(result.value("pending_approval", false)) pending = request;
 					else request->Complete(result);
-					if(capability && (capability->Occupied() || capability->HasProposal())) ShowWindow(SW_SHOWNOACTIVATE);
+					if(capability && (capability->Occupied() || capability->HasProposal())
+#ifdef ENABLE_TESTS
+						&& !testDeadline
+#endif
+					) ShowWindow(SW_SHOWNOACTIVATE);
 					RefreshReview();
 				}
 			GetDlgItem(Approve)->EnableWindow(pending != nullptr); GetDlgItem(Decline)->EnableWindow(pending != nullptr);
@@ -371,7 +414,15 @@ public:
 		CString state = broker && broker->Running() ? _T("MCP ready") : _T("MCP stopped / starting");
 		if(capability && capability->Occupied()) state += pending ? _T(" | AI OCCUPIED - expansion approval waiting (timer paused)") : _T(" | AI OCCUPIED - navigation and playback available; writes blocked");
 		if(review.is_object() && review.contains("status")) state += _T(" | Proposal ") + Text(review["status"].get<std::string>());
-		dc.TextOut(12, 216, state); dc.TextOut(12, 238, lastMessage);
+		dc.TextOut(12, 216, state);
+		if(pending && capability)
+		{
+			const auto range = capability->ExpansionRange();
+			CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
+				range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
+				range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
+			dc.TextOut(12, 238, grant);
+		} else dc.TextOut(12, 238, lastMessage);
 		DrawEvidence(dc);
 	}
 	void DrawEvidence(CDC &dc)
@@ -384,6 +435,7 @@ public:
 		{
 			first = std::min(first, cell["row"].get<int>()); last = std::max(last, cell["row"].get<int>());
 			for(const char *version : {"before", "after"}) { int n = cell[version]["note"].get<int>(); if(n >= 1 && n <= 128) { low = std::min(low, n); high = std::max(high, n); } }
+			if(const auto live = CurrentCell(cell); live && live->IsNote()) { low = std::min<int>(low, live->note); high = std::max<int>(high, live->note); }
 		}
 		if(low > high) { low = 48; high = 72; }
 		for(int projection = 0; projection < 3; ++projection)
@@ -394,7 +446,7 @@ public:
 			for(const auto &cell : diff)
 			{
 				int note = cell[projection == 0 ? "before" : "after"]["note"].get<int>();
-				if(projection == 2 && document && document->GetSoundFile().Patterns.IsValidPat(capability->Pattern())) note = document->GetSoundFile().Patterns[capability->Pattern()].GetpModCommand(cell["row"].get<ROWINDEX>(), cell["channel"].get<CHANNELINDEX>())->note;
+				if(projection == 2) { const auto live = CurrentCell(cell); note = live ? live->note : 0; }
 				int px = x + (cell["row"].get<int>() - first) * 310 / std::max(1, last - first + 1);
 				if(note >= 1 && note <= 128)
 				{
@@ -415,24 +467,45 @@ std::unique_ptr<Panel> panel;
 }
 
 void Start(CWnd &owner) { if(!panel) panel = std::make_unique<Panel>(owner); }
+#ifdef ENABLE_TESTS
+void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
+{
+	std::ofstream(std::wstring(report) + L".trace") << "before start";
+	Start(owner);
+	std::ofstream(std::wstring(report) + L".trace") << "after start";
+	panel->testReport = report;
+	panel->testDeadline = GetTickCount64() + 60000;
+	panel->document = &doc;
+	panel->enable.SetCheck(BST_CHECKED);
+	if(!panel->broker) panel->broker = std::make_unique<Broker>(panel->pipe);
+	std::ofstream(std::wstring(report) + L".trace") << "before activate";
+	doc.ActivateView(IDD_CONTROL_PATTERNS, 0);
+	std::ofstream(std::wstring(report) + L".trace") << "after activate";
+}
+#endif
 void Stop() { panel.reset(); }
 void ShowPanel() { if(panel) { panel->RefreshIdentity(); panel->ShowWindow(SW_SHOW); panel->SetForegroundWindow(); } }
 void DocumentClosed(CModDoc &doc)
 {
-	if(panel && panel->document == &doc) { panel->ReleaseNow(); panel->capability.reset(); panel->document = nullptr; panel->RefreshReview(); }
+	if(panel && panel->document == &doc) { if(panel->pending) { panel->pending->Complete(Failure("documentGone", "Document lifetime ended", "attachment")); panel->pending.reset(); } panel->ReleaseNow(); panel->capability.reset(); panel->document = nullptr; panel->RefreshReview(); }
 }
 
-bool BlockCommand(UINT command)
+bool IsReadOnlyCommand(UINT command)
 {
-	if(!panel || !panel->capability || !panel->capability->Occupied()) return false;
 	switch(command)
 	{
 	case ShowPanelCommand: case ID_PLAYER_PLAY: case ID_PLAYER_STOP: case ID_PLAYER_PAUSE:
 	case ID_PATTERN_PLAY: case ID_PATTERN_PLAYNOLOOP: case ID_PATTERN_RESTART:
 	case ID_VIEW_PATTERNS: case ID_VIEW_SAMPLES: case ID_VIEW_INSTRUMENTS: case ID_VIEW_GLOBALS: case ID_VIEW_COMMENTS:
-		return false;
-	default: return true;
+	case ID_EDIT_COPY: case ID_FILE_CLOSE:
+		return true;
+	default: return false;
 	}
+}
+
+bool BlockCommand(UINT command)
+{
+	return panel && panel->capability && panel->capability->Occupied() && !IsReadOnlyCommand(command);
 }
 
 bool FilterInput(MSG &msg)
@@ -450,8 +523,13 @@ bool FilterInput(MSG &msg)
 			int row = view->GetCurrentRow(), channel = view->GetCurrentChannel();
 			switch(msg.wParam) { case VK_UP: --row; break; case VK_DOWN: ++row; break; case VK_LEFT: --channel; break; case VK_RIGHT: ++channel; break;
 			case VK_PRIOR: row -= 16; break; case VK_NEXT: row += 16; break; case VK_HOME: row = 0; break; case VK_END: row = panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows() - 1; break; }
-			view->SetCursorPosition(PatternCursor(static_cast<ROWINDEX>(std::max(0, row)), static_cast<CHANNELINDEX>(std::clamp(channel, 0, int(panel->document->GetSoundFile().GetNumChannels()) - 1))));
-			view->SetSelToCursor(); return true;
+			const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if(!shift || !panel->keyboardSelecting) panel->selectionAnchor = PatternCursor(view->GetCurrentRow(), view->GetCurrentChannel());
+			panel->keyboardSelecting = shift;
+			view->SetCursorPosition(PatternCursor(static_cast<ROWINDEX>(std::clamp(row, 0, int(panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows()) - 1)), static_cast<CHANNELINDEX>(std::clamp(channel, 0, int(panel->document->GetSoundFile().GetNumChannels()) - 1))));
+			if(GetKeyState(VK_SHIFT) & 0x8000) view->SetCurSel(panel->selectionAnchor, PatternCursor(view->GetCurrentRow(), view->GetCurrentChannel(), PatternCursor::lastColumn));
+			else { view->SetSelToCursor(); panel->selectionAnchor = PatternCursor(view->GetCurrentRow(), view->GetCurrentChannel()); }
+			return true;
 		}
 		return true;
 	}
@@ -466,9 +544,16 @@ bool FilterInput(MSG &msg)
 		{
 			CPoint point(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam));
 			::MapWindowPoints(msg.hwnd, view->m_hWnd, &point, 1);
-			if(view->GetPianoRollPrototypeRect().PtInRect(point)) view->HandlePianoRollPrototypeLButtonDown(0, point);
-			else { auto cursor = view->GetPositionFromPoint(point); view->SetCursorPosition(cursor); view->SetCurSel(cursor); }
+			if(view->GetPianoRollPrototypeRect().PtInRect(point)) { view->HandlePianoRollPrototypeLButtonDown(0, point); view->AICancelPianoRollDrag(); panel->selecting = false; panel->keyboardSelecting = false; panel->selectionAnchor = PatternCursor(view->GetCurrentRow(), view->GetCurrentChannel()); }
+			else { auto cursor = view->GetPositionFromPoint(point); cursor.Sanitize(panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows(), panel->document->GetSoundFile().GetNumChannels()); view->SetCursorPosition(cursor); view->SetCurSel(cursor); panel->selectionAnchor = cursor; panel->selecting = true; panel->keyboardSelecting = false; }
 		}
+		if(onPattern && msg.message == WM_MOUSEMOVE && panel->selecting && (msg.wParam & MK_LBUTTON))
+		{
+			CPoint point(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam)); ::MapWindowPoints(msg.hwnd, view->m_hWnd, &point, 1);
+			auto cursor = view->GetPositionFromPoint(point); cursor.Sanitize(panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows(), panel->document->GetSoundFile().GetNumChannels());
+			view->SetCurSel(panel->selectionAnchor, cursor);
+		}
+		if(msg.message == WM_LBUTTONUP) panel->selecting = false;
 		return true;
 	}
 	return false;

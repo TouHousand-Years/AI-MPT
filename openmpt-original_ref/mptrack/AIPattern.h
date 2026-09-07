@@ -25,6 +25,7 @@ public:
 	Json Apply(bool whole = true, bool simulateFailure = false);
 	Json Reject();
 	Json Review() const;
+	Json ExpansionRange() const;
 	Json ResolveExpansion(bool approve);
 	void ForceRelease();
 	void Tick(Clock::time_point now = Clock::now());

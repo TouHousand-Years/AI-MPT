@@ -1,0 +1,23 @@
+适用于 .NET Framework MSBuild 版本 18.9.1+a81b43525
+
+  ancient.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-ancient.lib
+  zlib.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-zlib.lib
+  ogg.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-ogg.lib
+  lhasa.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-lhasa.lib
+  rtaudio.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-rtaudio.lib
+  portaudio.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-portaudio.lib
+  minizip.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-minizip.lib
+  lame.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\openmpt-lame.dll
+  mpg123.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\openmpt-mpg123.dll
+  rtmidi.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-rtmidi.lib
+  vorbis.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-vorbis.lib
+  flac.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-flac.lib
+  UnRAR.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-unrar.lib
+  opus.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opus.lib
+  opusenc.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opusenc.lib
+  opusfile.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opusfile.lib
+  'subwcrev' 不是内部或外部命令，也不是可运行的程序
+  或批处理文件。
+  找不到 C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\build\obj\vs2022win10\OpenMPT\x86_64\Debug\svn_version\svn_version.h
+  AIService.cpp
+  OpenMPT.vcxproj -> C:\Users\qnhxx\Documents\AI-Projects\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\OpenMPT.exe

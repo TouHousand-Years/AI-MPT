@@ -10,6 +10,7 @@
 
 
 #include "stdafx.h"
+#include "AIService.h"
 #include "Globals.h"
 #include "Childfrm.h"
 #include "Ctrl_com.h"
@@ -61,6 +62,21 @@ CModControlDlg::CModControlDlg(CModControlView &parent, CModDoc &document) : m_m
 {
 }
 
+
+// Gate queued commands as well as direct input while the AI holds write authority.
+LRESULT CModControlDlg::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	if(m_modDoc.AIOccupied() && (message == WM_COMMAND || message == WM_MOD_KEYCOMMAND || message == WM_MOD_MIDIMSG || message == WM_MOD_DRAGONDROPPING))
+		if(message != WM_COMMAND || !AI::IsReadOnlyCommand(LOWORD(wParam))) return 0;
+	return DialogBase::WindowProc(message, wParam, lParam);
+}
+
+LRESULT CModScrollView::WindowProc(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	if(GetDocument() && GetDocument()->AIOccupied() && (message == WM_COMMAND || message == WM_MOD_KEYCOMMAND || message == WM_MOD_MIDIMSG || message == WM_MOD_DRAGONDROPPING))
+		if(message != WM_COMMAND || !AI::IsReadOnlyCommand(LOWORD(wParam))) return 0;
+	return CScrollView::WindowProc(message, wParam, lParam);
+}
 
 CModControlDlg::~CModControlDlg()
 {

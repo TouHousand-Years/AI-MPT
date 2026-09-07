@@ -4,6 +4,7 @@
 #include "UpdateHints.h"
 #include "../soundlib/mod_specifications.h"
 #include "../soundlib/AudioCriticalSection.h"
+#include "../soundlib/tuning.h"
 #include <sstream>
 
 OPENMPT_NAMESPACE_BEGIN
@@ -76,7 +77,7 @@ std::string PatternCapability::Signature() const
 	// Exact internal dependency record, never sent to the Agent. No hash collisions.
 	data << sf.GetType() << ':' << sf.GetNumChannels() << ':' << pattern.GetNumRows() << ':'
 		<< sf.Order().GetDefaultTempo().GetRaw() << ':' << sf.Order().GetDefaultSpeed() << ':'
-		<< sf.m_nDefaultRowsPerBeat << ':' << sf.m_nDefaultRowsPerMeasure << ':' << int(sf.m_nTempoMode)
+		<< sf.m_SongFlags.GetRaw() << ':' << sf.m_nDefaultRowsPerBeat << ':' << sf.m_nDefaultRowsPerMeasure << ':' << int(sf.m_nTempoMode)
 		<< ':' << pattern.GetRowsPerBeat() << ':' << pattern.GetRowsPerMeasure() << ':';
 	for(const auto swing : sf.m_tempoSwing) data << swing << ',';
 	for(const auto swing : pattern.GetTempoSwing()) data << swing << ',';
@@ -96,6 +97,7 @@ std::string PatternCapability::Signature() const
 		{
 			sf.SaveITIInstrument(i, data, {}, false, false);
 			sf.SaveExtendedInstrumentProperties(i, MOD_TYPE_MPT, data);
+			if(sf.Instruments[i]->pTuning) sf.Instruments[i]->pTuning->Serialize(data);
 		}
 	}
 	return data.str();
@@ -291,8 +293,8 @@ Json PatternCapability::Replace(const Json &args, bool approved)
 		candidate[offset] = desired[i];
 	}
 	Json result{{"ok", true}, {"cells", cells}, {"diff", diff}};
-	if(expansion) m_envelope = PatternRect(PatternCursor(std::min<int>(first, m_envelope.GetStartRow()), std::min<int>(channel, m_envelope.GetStartChannel())),
-		PatternCursor(std::max<int>(first + count - 1, m_envelope.GetEndRow()), std::max<int>(channel, m_envelope.GetEndChannel()), PatternCursor::lastColumn));
+	if(expansion) m_envelope = PatternRect(PatternCursor(static_cast<ROWINDEX>(std::min<int>(first, m_envelope.GetStartRow())), static_cast<CHANNELINDEX>(std::min<int>(channel, m_envelope.GetStartChannel()))),
+		PatternCursor(static_cast<ROWINDEX>(std::max<int>(first + count - 1, m_envelope.GetEndRow())), static_cast<CHANNELINDEX>(std::max<int>(channel, m_envelope.GetEndChannel())), PatternCursor::lastColumn));
 	m_candidate.swap(candidate);
 	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
 	return result;
@@ -310,8 +312,17 @@ Json PatternCapability::ResolveExpansion(bool approve)
 	return Replace(args, true);
 }
 
+Json PatternCapability::ExpansionRange() const
+{
+	if(!m_pending) return Json::object();
+	return {{"first_row", m_pending->at("first_row")}, {"last_row", m_pending->at("first_row").get<int>() + m_pending->at("row_count").get<int>() - 1},
+		{"channel", m_pending->at("channel")}, {"grant_first_row", m_envelope.GetStartRow()}, {"grant_last_row", m_envelope.GetEndRow()},
+		{"grant_first_channel", m_envelope.GetStartChannel()}, {"grant_last_channel", m_envelope.GetEndChannel()}};
+}
+
 Json PatternCapability::Review() const
 {
+	if(GetCurrentThreadId() != m_thread) return Failure("owningThreadRequired", "Use owning thread");
 	if(!m_proposal) return Failure("noProposal", "No proposal available");
 	return {{"ok", true}, {"pattern", m_pattern}, {"status", Signature() == m_signature ? "current" : "stale"},
 		{"diff", Diff(m_baseline, m_candidate)}};

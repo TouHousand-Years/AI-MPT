@@ -1606,7 +1606,17 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 		return FALSE;
 	}
 
-	#ifdef ENABLE_TESTS
+#ifdef ENABLE_TESTS
+	if(const wchar_t *report = _wgetenv(L"OPENMPT_AI_ENDPOINT_REPORT"))
+	{
+		if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))
+			if(auto *doc = static_cast<CModDoc *>(OpenDocumentFile(fixture, FALSE)))
+			{
+				AI::IntegrationHost(*pMainFrame, *doc, report);
+				EndWaitCursor(); StopSplashScreen(); return TRUE;
+			}
+		return FALSE;
+	}
 	if(const wchar_t *fixture = _wgetenv(L"OPENMPT_AI_TEST_FIXTURE"))
 	{
 		try

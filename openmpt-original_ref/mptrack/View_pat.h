@@ -283,6 +283,7 @@ public:
 	bool FinishPianoRollPrototypeDrag(CPoint point);
 	bool TransposePianoRollPrototypeNote(int semitones);
 	void InvalidatePianoRollPrototype();
+	void AICancelPianoRollDrag() { m_pianoRollPrototypeDragging = false; if(GetCapture() == this) ReleaseCapture(); }
 	void UpdatePianoRollPrototypePaneLayout();
 
 	bool SetCurrentPattern(PATTERNINDEX pat, ROWINDEX row = ROWINDEX_INVALID);

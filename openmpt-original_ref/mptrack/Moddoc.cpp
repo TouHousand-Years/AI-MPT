@@ -160,6 +160,12 @@ CModDoc::~CModDoc()
 }
 
 
+BOOL CModDoc::OnCmdMsg(UINT id, int code, void *extra, AFX_CMDHANDLERINFO *info)
+{
+	if(AIOccupied() && code == CN_COMMAND && !AI::IsReadOnlyCommand(id)) return TRUE;
+	return CDocument::OnCmdMsg(id, code, extra, info);
+}
+
 void CModDoc::SetModified(bool modified)
 {
 	if(modified) ++m_aiRevision;

@@ -179,6 +179,7 @@ public:
 #if MPT_COMPILER_CLANG
 #pragma clang diagnostic pop
 #endif // MPT_COMPILER_CLANG
+	BOOL OnCmdMsg(UINT id, int code, void *extra, AFX_CMDHANDLERINFO *info) override;
 	void SetModified(bool modified = true);
 	bool ModifiedSinceLastAutosave();
 	void SetShowSaveDialog(bool b) { m_ShowSavedialog = b; }

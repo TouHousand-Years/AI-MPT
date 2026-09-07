@@ -115,12 +115,6 @@ bool CPatternUndo::PrepareBuffer(undobuf_t &buffer, PATTERNINDEX pattern, CHANNE
 		return false;
 	}
 
-	// Remove an undo step if there are too many.
-	if(buffer.size() >= MAX_UNDO_LEVEL)
-	{
-		buffer.erase(buffer.begin(), buffer.begin() + (buffer.size() - MAX_UNDO_LEVEL + 1));
-	}
-
 	UndoInfo undo;
 	undo.pattern = pattern;
 	undo.numPatternRows = patRows;
@@ -157,6 +151,8 @@ bool CPatternUndo::PrepareBuffer(undobuf_t &buffer, PATTERNINDEX pattern, CHANNE
 	}
 
 	buffer.push_back(std::move(undo));
+	// Only evict after every allocation succeeded. Failed preparation preserves history.
+	if(buffer.size() > MAX_UNDO_LEVEL) buffer.erase(buffer.begin(), buffer.begin() + (buffer.size() - MAX_UNDO_LEVEL));
 
 	if(!linkToPrevious)
 		modDoc.UpdateAllViews(nullptr, UpdateHint().Undo());
@@ -167,6 +163,7 @@ bool CPatternUndo::PrepareBuffer(undobuf_t &buffer, PATTERNINDEX pattern, CHANNE
 // Restore an undo point. Returns which pattern has been modified.
 PATTERNINDEX CPatternUndo::Undo()
 {
+	if(modDoc.AIOccupied()) return PATTERNINDEX_INVALID;
 	return Undo(UndoBuffer, RedoBuffer, false);
 }
 
@@ -174,6 +171,7 @@ PATTERNINDEX CPatternUndo::Undo()
 // Restore an undo point. Returns which pattern has been modified.
 PATTERNINDEX CPatternUndo::Redo()
 {
+	if(modDoc.AIOccupied()) return PATTERNINDEX_INVALID;
 	return Undo(RedoBuffer, UndoBuffer, false);
 }
 
