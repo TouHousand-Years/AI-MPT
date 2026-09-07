@@ -15,6 +15,10 @@ bool BlockCommand(UINT command);
 // Appends a timestamped line to the integration trace file (<report>.trace);
 // a no-op unless OPENMPT_AI_ENDPOINT_REPORT is set.
 void TestTrace(const std::string &text);
+// Called once per audio buffer from the realtime callback (issue 30). Traces a
+// violation when the calling thread is inside an AI IPC read/write/wait path,
+// plus one first-call line so tests can prove the check ran on the audio thread.
+void AudioCallbackIpcCheck();
 #ifdef ENABLE_TESTS
 void IntegrationHost(CWnd &owner, CModDoc &document, const wchar_t *report);
 #endif

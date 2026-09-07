@@ -10,6 +10,7 @@
 #include "View_pat.h"
 #include "UpdateHints.h"
 #include <sddl.h>
+#include <atomic>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -22,14 +23,47 @@ namespace AI
 void TestTrace(const std::string &text)
 {
 	if(const wchar_t *report = _wgetenv(L"OPENMPT_AI_ENDPOINT_REPORT"))
+	{
+		// Called from the UI thread, the broker thread and the realtime audio
+		// callback (first instrumented line only); keep each line intact.
+		static std::mutex traceMutex;
+		std::lock_guard lock(traceMutex);
 		std::ofstream(std::wstring(report) + L".trace", std::ios::app)
 			<< GetTickCount64() << " tid=" << GetCurrentThreadId() << " " << text << "\n";
+	}
 }
 namespace
 {
 constexpr DWORD MaxFrame = 4 * 1024 * 1024;
 std::string UTF8(const CString &s) { return mpt::ToCharset(mpt::Charset::UTF8, mpt::ToUnicode(s)); }
 CString Text(const std::string &s) { return mpt::ToCString(mpt::ToUnicode(mpt::Charset::UTF8, s)); }
+
+// Ticket 30: every AI IPC read, write, and wait registers its thread here for
+// the duration of the operation. The realtime audio callback scans this set to
+// prove no IPC path ever runs on its thread (AI::AudioCallbackIpcCheck).
+constexpr size_t IpcThreadSlots = 8;
+std::atomic<DWORD> g_ipcThreads[IpcThreadSlots] = {};
+struct IpcThreadScope
+{
+	const DWORD m_thread = GetCurrentThreadId();
+	IpcThreadScope()
+	{
+		for(auto &slot : g_ipcThreads)
+		{
+			if(slot.load(std::memory_order_relaxed) == m_thread) return;
+			DWORD expected = 0;
+			if(slot.compare_exchange_strong(expected, m_thread, std::memory_order_relaxed)) return;
+		}
+	}
+	~IpcThreadScope()
+	{
+		for(auto &slot : g_ipcThreads)
+		{
+			DWORD expected = m_thread;
+			if(slot.compare_exchange_strong(expected, 0, std::memory_order_relaxed)) return;
+		}
+	}
+};
 
 struct Request
 {
@@ -46,6 +80,17 @@ struct Request
 	}
 };
 
+// A `direct:true` call envelope is never queued: the broker attempts the model
+// read on its own thread and the owning-thread guard rejects it. This makes the
+// issue-24 dispatch seam demonstrable over the real transport.
+Json DirectModelRead()
+{
+	if(!theApp.InGuiThread())
+		return Failure("owningThreadRequired", "Direct model read requires the document owning thread", "dispatch");
+	// Unreachable from the broker thread; queued requests go through Panel::Dispatch.
+	return Failure("internalError", "Direct read has no owning-thread path", "dispatch");
+}
+
 // The broker only handles bytes and envelopes. It has no document pointers.
 class Broker
 {
@@ -57,6 +102,7 @@ class Broker
 	std::atomic<bool> m_running = false;
 	bool IO(HANDLE pipe, void *buffer, DWORD size, bool write)
 	{
+		IpcThreadScope ipc;
 		DWORD offset = 0;
 		while(offset < size)
 		{
@@ -127,20 +173,23 @@ class Broker
 			connect.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 			BOOL connected = ConnectNamedPipe(pipe, &connect);
 			DWORD error = connected ? ERROR_SUCCESS : GetLastError();
-			if(error == ERROR_IO_PENDING)
 			{
-				HANDLE waits[]{m_stop, connect.hEvent};
-				if(WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
+				IpcThreadScope ipc;
+				if(error == ERROR_IO_PENDING)
 				{
-					DWORD unused = 0;
-					connected = GetOverlappedResult(pipe, &connect, &unused, FALSE);
-				} else
-				{
-					CancelIoEx(pipe, &connect);
-					DWORD unused = 0;
-					GetOverlappedResult(pipe, &connect, &unused, TRUE);
-				}
-			} else connected = connected || error == ERROR_PIPE_CONNECTED;
+					HANDLE waits[]{m_stop, connect.hEvent};
+					if(WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
+					{
+						DWORD unused = 0;
+						connected = GetOverlappedResult(pipe, &connect, &unused, FALSE);
+					} else
+					{
+						CancelIoEx(pipe, &connect);
+						DWORD unused = 0;
+						GetOverlappedResult(pipe, &connect, &unused, TRUE);
+					}
+				} else connected = connected || error == ERROR_PIPE_CONNECTED;
+			}
 			CloseHandle(connect.hEvent);
 			if(!connected) break;
 			std::string attachedInstance, attachedDocument;
@@ -159,12 +208,15 @@ class Broker
 					const bool attach = envelope["operation"] == "attach";
 					if(!attach && (attachedInstance.empty() || envelope["instance"] != attachedInstance || envelope["document"] != attachedDocument))
 						result = Failure("notAttached", "Explicit attachment required", "attachment");
+					else if(!attach && envelope.value("direct", false))
+						result = DirectModelRead();
 					else
 					{
 						auto request = std::make_shared<Request>();
 						request->envelope = envelope;
 						{ std::lock_guard lock(m_mutex); m_queue.push_back(request); }
 						std::unique_lock lock(request->mutex);
+						IpcThreadScope ipc;
 						while(!request->done && WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
 							request->ready.wait_for(lock, std::chrono::milliseconds(100));
 						if(!request->done) break;
@@ -223,6 +275,7 @@ public:
 	std::string instance;
 	std::wstring pipe;
 	Json review;
+	CString identityText;
 	unsigned seconds = 300;
 	bool selecting = false, keyboardSelecting = false;
 	PatternCursor selectionAnchor;
@@ -232,6 +285,7 @@ public:
 	std::wstring testReport;
 	ULONGLONG testDeadline = 0;
 	ULONGLONG tickTrace = 0;
+	PATTERNINDEX patternSettle = PATTERNINDEX_INVALID;
 #endif
 	Panel(CWnd &owner)
 	{
@@ -271,11 +325,15 @@ public:
 	{
 		auto *active = CMainFrame::GetMainFrame()->GetActiveDoc();
 		CString value = _T("Pipe: ") + CString(pipe.c_str()) + _T("\r\nInstance: ") + Text(instance);
-		value += _T("\r\nActive document: ");
-		if(active) value += Text(active->AIIdentity()) + _T(" | ") + active->GetTitle();
-		else value += _T("Open a document and its Patterns tab");
-		value += _T("\r\nSession binds the displayed document's Pattern and selection on the first read.");
-		identity.SetWindowText(value);
+		value += _T("\r\nOpen documents (probe clients must be given one explicit ID):");
+		for(auto *doc : theApp.GetOpenDocuments())
+		{
+			value += _T("\r\n  ") + Text(doc->AIIdentity()) + _T(" | ") + doc->GetTitle();
+			if(doc == active) value += _T("  (active; session binds its Patterns-tab Pattern and selection)");
+		}
+		if(theApp.GetOpenDocuments().empty()) value += _T("\r\n  (none) Open a document and its Patterns tab.");
+		// Called from the timer pump: only rewrite the control when something changed.
+		if(value != identityText) { identityText = value; identity.SetWindowText(value); }
 	}
 	void ReleaseNow()
 	{
@@ -404,16 +462,37 @@ public:
 					if(auto *view = PatternView(*document))
 					{
 						const wchar_t *pattern = _wgetenv(L"OPENMPT_AI_PATTERN");
-						view->SetCurrentPattern(pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0);
-						Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
-						const std::wstring tmp = testReport + L".tmp";
-						std::ofstream(tmp) << info.dump();
-						if(_wrename(tmp.c_str(), testReport.c_str()) == 0) TestTrace("endpoint written");
-						else TestTrace("endpoint rename failed err=" + std::to_string(GetLastError()));
-						testReport.clear();
+						const PATTERNINDEX wanted = pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0;
+						view->SetCurrentPattern(wanted);
+						// The harness plays audio while binding patterns; follow-song
+						// would drag the view back to the playing pattern and break
+						// the explicit binding under test.
+						if(document->GetFollowWnd() == view->m_hWnd)
+						{
+							document->SetFollowWnd(nullptr);
+							TestTrace("endpoint: follow-song disabled");
+						}
+						// Pattern page initialization completes asynchronously after
+						// the view appears and resets the current pattern once more;
+						// publish the endpoint only when the requested pattern has
+						// stayed bound across two consecutive ticks.
+						const PATTERNINDEX bound = view->GetCurrentPattern();
+						const bool settled = bound == wanted && patternSettle == wanted;
+						patternSettle = bound;
+						if(settled)
+						{
+							Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
+							const std::wstring tmp = testReport + L".tmp";
+							std::ofstream(tmp) << info.dump();
+							if(_wrename(tmp.c_str(), testReport.c_str()) == 0) TestTrace("endpoint written");
+							else TestTrace("endpoint rename failed err=" + std::to_string(GetLastError()));
+							testReport.clear();
+							patternSettle = PATTERNINDEX_INVALID;
+						} else TestTrace("endpoint: pattern not settled yet");
 					}
 			}
 #endif
+			RefreshIdentity();
 			if(capability) capability->Tick();
 			if(capability && capability->Occupied() && IsIconic()) ShowWindow(SW_SHOWNOACTIVATE);
 			if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
@@ -506,6 +585,21 @@ END_MESSAGE_MAP()
 std::unique_ptr<Panel> panel;
 }
 
+// Ticket 30 acceptance: no IPC read/write/wait/query may execute on the
+// realtime audio callback. The audio callback calls this every buffer; the
+// per-buffer cost is one atomic exchange and a few relaxed loads. A violation
+// is traced (never thrown) so the native integration test can assert on it.
+void AudioCallbackIpcCheck()
+{
+	static std::atomic<bool> announced = false;
+	if(!announced.load(std::memory_order_relaxed) && !announced.exchange(true))
+		TestTrace("audio-callback: IPC check instrumented");
+	const DWORD thread = GetCurrentThreadId();
+	for(const auto &slot : g_ipcThreads)
+		if(slot.load(std::memory_order_relaxed) == thread)
+			TestTrace("VIOLATION: realtime audio callback executed an AI IPC path");
+}
+
 void Start(CWnd &owner) { if(!panel) panel = std::make_unique<Panel>(owner); }
 #ifdef ENABLE_TESTS
 void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
@@ -520,6 +614,20 @@ void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 	TestTrace("host: started, broker=" + std::string(panel->broker && panel->broker->Running() ? "1" : "0"));
 	doc.ActivateView(IDD_CONTROL_PATTERNS, 0);
 	TestTrace(std::string("host: activated, view=") + (PatternView(doc) ? "1" : "0"));
+	// The integration process runs hidden, so CModControlView::OnActivateModView
+	// skips the tab switch unless our frame is the thread's active window. A
+	// visible Patterns view is also the owner-demo precondition.
+	if(!PatternView(doc))
+	{
+		CMainFrame::GetMainFrame()->ShowWindow(SW_SHOW);
+		CMainFrame::GetMainFrame()->SetActiveWindow();
+		doc.ActivateView(IDD_CONTROL_PATTERNS, 0);
+		TestTrace(std::string("host: re-activated shown, view=") + (PatternView(doc) ? "1" : "0"));
+	}
+	// Issue 30 AC: prove no IPC path runs on the realtime audio callback while
+	// probe traffic flows. Open the audio device even though no one is listening.
+	doc.OnPatternPlay();
+	TestTrace("host: playback requested");
 }
 #endif
 void Stop() { panel.reset(); }

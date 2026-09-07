@@ -906,6 +906,7 @@ void CMainFrame::SoundCallbackLockedCallback(SoundDevice::CallbackBuffer<Dithers
 {
 	MPT_TRACE_SCOPE();
 	MPT_ASSERT(InAudioThread());
+	AI::AudioCallbackIpcCheck();
 	OPENMPT_PROFILE_FUNCTION(Profiler::Audio);
 	BufferInputWrapper source(buffer);
 	BufferOutputWrapper target(buffer);
