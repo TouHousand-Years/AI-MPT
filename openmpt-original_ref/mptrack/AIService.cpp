@@ -90,7 +90,6 @@ struct Request
 struct DisconnectNotice
 {
 	uint64 connection = 0;
-	std::string instance;
 };
 
 // The broker only handles bytes and envelopes. It has no document pointers.
@@ -250,7 +249,7 @@ class Broker
 			if(!attachedInstance.empty())
 			{
 				std::lock_guard lock(m_disconnectMutex);
-				m_disconnects.push_back({connection, attachedInstance});
+				m_disconnects.push_back({connection});
 			}
 			DisconnectNamedPipe(pipe);
 		}
@@ -407,9 +406,11 @@ public:
 	void HandleDisconnect(const DisconnectNotice &notice)
 	{
 		// Ticket 31 AC4: process loss leaves no app residue. Release only the
-		// state bound to this exact attachment; if a newer client already
-		// attached on another connection, this stale notice must not touch it.
-		if(notice.instance != instance || notice.connection != attachedConnection) return;
+		// state bound to this exact attachment; connection ids are monotonic and
+		// unique within the broker, so the id alone identifies the attachment,
+		// and a newer client already attached on another connection is never
+		// touched by this stale notice.
+		if(notice.connection != attachedConnection) return;
 		attachedConnection = 0;
 		// Unhanded retained work and pending requests die with their connection.
 		if(pending) { pending->Complete(Failure("occupancyLost", "Client disconnected")); pending.reset(); }

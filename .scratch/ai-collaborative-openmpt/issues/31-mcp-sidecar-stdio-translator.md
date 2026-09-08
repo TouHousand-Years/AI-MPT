@@ -38,7 +38,10 @@ Label: ready-for-agent
   queues identity-only disconnect notices when an attached connection drops;
   the UI/owning thread drains disconnect notices before new requests and
   releases unhanded state only for the matching connection, so a stale notice
-  cannot affect a newer connection and a handed-off human proposal survives.
+  cannot affect a newer connection. A proposal frozen by `handoff_for_review`
+  is a deliberate human Review Unit, not Sidecar residue: it must survive the
+  disconnect, while all unhanded retained, candidate and pending work bound to
+  the dropped connection is released.
 - A native Sidecar restart test was added, and the integration harness
   startup-failure cleanup now kills and waits for the child process.
 - Verification: `.\build-local.ps1` PASS; native suite 3 tests OK; sidecar

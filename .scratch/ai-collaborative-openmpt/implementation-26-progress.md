@@ -80,25 +80,12 @@ the owner's functional acceptance; do not mark the spec complete without it.
 
 ## Update 2026-09-08: issue 31 resolved
 
-- The official MCP Inspector CLI, used as a real MCP client, launched
-  `python sidecar/openmpt_mcp.py` over stdio, listed exactly the five
-  Pattern-mode tools, returned `notAttached` when launched without explicit
-  `--pipe`/`--instance`/`--document`, and completed a real
-  `get_pattern_context` against running OpenMPT with
-  `test-fixtures/ai-collab-fixture.mptm` pattern 0 (`ok`, `isError: false`,
-  Score Context rows=128, channels=4, instruments E-Piano / Warm Pad /
-  Round Bass).
-- TDD AC4 RED: a Sidecar that obtained `occupy=true` and then exited left
-  retained occupancy; a fresh explicitly attached Sidecar received a
-  capability/busy failure. Fixed in `AIService.cpp`: the broker assigns
-  monotonic connection ids and queues identity-only disconnect notices; the
-  UI/owning thread drains disconnects before new requests and releases
-  unhanded state only for the matching connection, so a stale notice cannot
-  affect a newer connection and a handed-off human proposal survives.
-- A native Sidecar restart test was added; startup-failure cleanup now kills
-  and waits for the child process.
-- Verification: `.\build-local.ps1` PASS; native suite 3 tests OK; sidecar
-  discover suite 25 OK with 3 opt-in tests skipped in the non-native run;
-  official Inspector real call PASS. Issue 31's four acceptance criteria are
-  met; issue 26 itself remains open, paused before the owner's manual
-  functional verification.
+Issue 31 was resolved and all four of its acceptance criteria were met on
+this date. The canonical detailed record — the AC4 disconnect-notice fix in
+`AIService.cpp`, the MCP Inspector real-client verification, and the full
+verification results — is the 2026-09-08 work log in
+`.scratch/ai-collaborative-openmpt/issues/31-mcp-sidecar-stdio-translator.md`.
+Result summary: `build-local.ps1` PASS; native suite 3 tests OK; sidecar
+discover suite 25 OK with 3 opt-in tests skipped in the non-native run;
+official Inspector real call PASS. Issue 26 itself remains open, paused
+before the owner's manual functional verification.
