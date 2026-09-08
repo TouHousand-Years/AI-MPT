@@ -16,6 +16,11 @@ static AI::Json Cell(int note, int instrument = 2, int volume = 40)
 {
 	return {{"note", note}, {"instrument", instrument}, {"volume_command", 1}, {"volume", volume}, {"effect_command", 0}, {"effect_parameter", 0}};
 }
+static AI::Json Raw(const ModCommand &cell)
+{
+	return {{"note", cell.note}, {"instrument", cell.instr}, {"volume_command", cell.volcmd}, {"volume", cell.vol},
+		{"effect_command", cell.command}, {"effect_parameter", cell.param}};
+}
 static AI::Json Segment(const AI::Json &token, int channel, int note)
 {
 	return {{"session", token}, {"channel", channel}, {"first_row", 0}, {"row_count", 8},
@@ -92,18 +97,30 @@ void AIPatternTests(const CString &fixture)
 			&& failure["error"]["value"] == 65 && failure["error"]["reason"].is_string(), "Typed invalid volume");
 		Require(cap.Call("get_pattern_context", {{"session", token}}).at("context") == beforeFailure, "Failed call leaves candidate unchanged");
 		Require(!OK(cap.Call("release_occupancy", {{"session", token}})), "Edited candidate cannot be released");
+		const auto revisionBeforeHandoff = doc->AIRevision();
 		const auto handoff = cap.Call("handoff_for_review", {{"session", token}});
 		Require(OK(handoff) && !doc->AIOccupied(), "Handoff freezes and releases");
 		const auto proposal = cap.Review();
-		Require(handoff["diff"].size() == 2 && proposal["diff"] == handoff["diff"], "Multi-voice calls normalize to two final cells");
+		Require(proposal["status"] == "current" && handoff["diff"].size() == 2 && proposal["diff"] == handoff["diff"], "Multi-voice calls normalize to one current whole-proposal diff");
+		for(const auto &change : proposal["diff"])
+		{
+			const auto &live = *sf.Patterns[0].GetpModCommand(change["row"].get<ROWINDEX>(), change["channel"].get<CHANNELINDEX>());
+			Require(Raw(live) == change["before"], "Before Apply the current document equals every baseline cell");
+		}
+		Require(doc->AIRevision() == revisionBeforeHandoff, "Review handoff does not change the document revision");
 		if(const wchar_t *demo = _wgetenv(L"OPENMPT_AI_DEMO_REPORT"))
 			std::ofstream(demo) << AI::Json{{"accumulated_candidate_diff", handoff["diff"]}, {"final_proposal", proposal}}.dump(2) << '\n';
 		const auto revision = doc->AIRevision();
 		const auto undoName = doc->GetPatternUndo().GetUndoName();
-		Require(!OK(cap.Apply(false)), "Partial acceptance unsupported");
-		Require(!OK(cap.Apply(true, true)), "Simulated failure rejected");
+		const auto immutableProposal = cap.Review();
+		const auto partial = cap.Apply(false);
+		Require(!OK(partial) && partial["error"]["code"] == "unsupported", "Partial acceptance unsupported");
+		Require(cap.HasProposal() && cap.Review() == immutableProposal, "Unsupported partial acceptance preserves the immutable proposal");
+		const auto commitFailure = cap.Apply(true, true);
+		Require(!OK(commitFailure) && commitFailure["error"]["code"] == "commitFailed", "Simulated commit failure rejected");
 		Require(doc->AIRevision() == revision && doc->GetPatternUndo().GetUndoName() == undoName, "Failed Apply leaves revision and Undo untouched");
 		Require(*sf.Patterns[0].GetpModCommand(0, 1) == original, "Failed Apply leaves Pattern untouched");
+		Require(cap.HasProposal() && cap.Review() == immutableProposal, "Failed Apply preserves the same immutable proposal for retry");
 		Require(OK(cap.Apply()), "Whole proposal applies");
 		Require(doc->AIRevision() == revision + 1, "Apply increments revision exactly once");
 		Require(sf.Patterns[0].GetpModCommand(0, 1)->note == 49 && sf.Patterns[0].GetpModCommand(0, 2)->note == 53, "Both voices committed");
@@ -119,9 +136,12 @@ void AIPatternTests(const CString &fixture)
 		Require(doc->GetPatternUndo().Redo() == PATTERNINDEX_INVALID && doc->GetPatternUndo().CanRedo(), "Native Redo is blocked during retained occupancy");
 		cap.Call("replace_pattern_segment", Segment(token, 1, 50));
 		cap.Call("handoff_for_review", {{"session", token}});
+		const auto currentProposal = cap.Review();
 		const auto saved = *sf.Patterns[0].GetpModCommand(0, 0);
 		sf.Patterns[0].GetpModCommand(0, 0)->note++;
 		Require(cap.Apply()["error"]["code"] == "stale" && cap.HasProposal(), "Stale proposal refused and retained");
+		const auto staleProposal = cap.Review();
+		Require(staleProposal["status"] == "stale" && staleProposal["diff"] == currentProposal["diff"], "Stale proposal remains immutable and available read-only without rebasing");
 		*sf.Patterns[0].GetpModCommand(0, 0) = saved; cap.Reject();
 		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		auto other = *sf.Patterns[1].GetpModCommand(0, 0);
@@ -159,11 +179,29 @@ void AIPatternTests(const CString &fixture)
 		cap.Call("abort_session", {{"session", token}});
 	}
 	{
+		auto &sf = doc->GetSoundFile();
+		const auto live = *sf.Patterns[0].GetpModCommand(0, 1);
+		const auto revision = doc->AIRevision();
+		const auto undoName = doc->GetPatternUndo().GetUndoName();
 		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 0), PatternCursor(7, 0, PatternCursor::lastColumn)));
-		cap.Configure(300, true);
+		const auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(cap.Call("replace_pattern_segment", Segment(token, 1, 49)).value("pending_approval", false) && cap.PendingExpansion(), "Expansion approval is pending before human release");
+		cap.ForceRelease();
+		Require(!cap.Occupied() && !cap.PendingExpansion() && !doc->AIOccupied(), "Human release clears retained occupancy and the pending approval");
+		Require(cap.ResolveExpansion(true)["error"]["code"] == "occupancyLost"
+			&& cap.Call("get_pattern_context", {{"session", token}})["error"]["code"] == "occupancyLost", "Human release invalidates the approval and session token");
+		Require(*sf.Patterns[0].GetpModCommand(0, 1) == live && doc->AIRevision() == revision
+			&& doc->GetPatternUndo().GetUndoName() == undoName, "Human release during approval changes no document or Undo state");
+	}
+	{
+		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 0), PatternCursor(7, 0, PatternCursor::lastColumn)));
+		cap.Configure(300, false);
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(cap.Call("replace_pattern_segment", Segment(token, 1, 49)).value("pending_approval", false), "Ask-each-time preference prompts for expansion");
+		Require(cap.ResolveExpansion(false)["error"]["code"] == "rangeRejected", "Owner can decline the prompted expansion");
+		cap.Configure(300, true);
 		const auto expanded = cap.Call("replace_pattern_segment", Segment(token, 1, 49));
-		Require(OK(expanded) && !expanded.contains("pending_approval"), "Always-approve preference expands without a prompt");
+		Require(OK(expanded) && !expanded.contains("pending_approval"), "Changing to always-approve affects the subsequent expansion request");
 		cap.Call("abort_session", {{"session", token}});
 	}
 	{

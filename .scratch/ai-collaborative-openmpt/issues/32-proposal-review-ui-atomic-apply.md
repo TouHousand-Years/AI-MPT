@@ -7,14 +7,49 @@ Label: ready-for-agent
 
 **Blocked by:** 29 (Pattern capability seam with the five Pattern-mode tools)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 ## Acceptance criteria (demo to owner, against real document state)
 
-- [ ] With an injected proposal, the owner sees the normalized whole-proposal diff in synchronized Tracker and Piano Roll evidence; before Apply the current document equals the baseline.
-- [ ] Apply of a multi-voice proposal advances the document revision exactly once, creates exactly one ordinary Pattern Undo step, plays back through normal playback, and one ordinary Undo restores the complete pre-Apply Pattern (the voice calls are not undone separately).
-- [ ] Reject discards the proposal with zero change to Pattern cells, dependency signature, and Undo stack.
-- [ ] After a post-handoff human Pattern edit, Apply of the old proposal is refused as stale (never silently rebased); the stale proposal remains available read-only for comparison.
-- [ ] A simulated commit failure leaves every Pattern cell, the dependency signature, and the Undo stack unchanged, with the same immutable proposal still available for retry; attempted partial acceptance fails as unsupported and changes no state.
-- [ ] During retained occupancy the owner sees the occupancy indicator, can navigate/inspect/play but cannot write/Undo/Redo, and can force-release at any time (including while a range-expansion approval is pending), invalidating token and candidate.
-- [ ] The focused settings area exposes MCP enablement, service status, occupancy timeout, and the expansion-approval preference; changing the preference takes effect for subsequent expansion requests.
+- [x] With an injected proposal, the owner sees the normalized whole-proposal diff in synchronized Tracker and Piano Roll evidence; before Apply the current document equals the baseline.
+- [x] Apply of a multi-voice proposal advances the document revision exactly once, creates exactly one ordinary Pattern Undo step, plays back through normal playback, and one ordinary Undo restores the complete pre-Apply Pattern (the voice calls are not undone separately).
+- [x] Reject discards the proposal with zero change to Pattern cells, dependency signature, and Undo stack.
+- [x] After a post-handoff human Pattern edit, Apply of the old proposal is refused as stale (never silently rebased); the stale proposal remains available read-only for comparison.
+- [x] A simulated commit failure leaves every Pattern cell, the dependency signature, and the Undo stack unchanged, with the same immutable proposal still available for retry; attempted partial acceptance fails as unsupported and changes no state.
+- [x] During retained occupancy the owner sees the occupancy indicator, can navigate/inspect/play but cannot write/Undo/Redo, and can force-release at any time (including while a range-expansion approval is pending), invalidating token and candidate.
+- [x] The focused settings area exposes MCP enablement, service status, occupancy timeout, and the expansion-approval preference; changing the preference takes effect for subsequent expansion requests.
+
+## Work log — 2026-09-08
+
+Issue 32 was completed by verifying and closing the proposal-review surface
+that had accumulated across tickets 27–31. The application panel already binds
+to the public `PatternCapability` proposal model and exposes whole-proposal
+Apply/Reject only, a normalized Tracker cell list, Baseline / Proposal /
+Current-document Piano Roll evidence, visible retained-occupancy and proposal
+status, the high-priority release action, expansion approval controls, and the
+focused MCP settings row. The confirmed test seam remains the public proposal
+model; owner-facing UI and playback verification remain manual as specified by
+the parent ticket.
+
+The fixture-driven native regression suite now additionally proves that:
+
+- handoff exposes one current normalized multi-voice diff while every live cell
+  still equals its baseline and the Document Revision is unchanged;
+- unsupported partial acceptance and simulated commit failure preserve the
+  exact immutable proposal, Pattern, revision, and native Undo state for retry;
+- a stale proposal retains its original diff read-only and is never rebased;
+- force-release during a pending expansion invalidates both the request and
+  token, discards the candidate, and changes no document or Undo state; and
+- switching from ask-each-time to always-approve affects the next expansion
+  request in the same Agent Edit Session.
+
+Verification:
+
+- `.\build-local.ps1 -Test` — PASS, including the two-voice proposal report.
+- `python test-fixtures\validate_fixture.py` — all 131 checks passed, including
+  playback evidence.
+- `python -m unittest discover -s sidecar -v` — 25 tests passed, with the three
+  opt-in native integration tests skipped.
+- `libopenmpt_test.exe` — completed with only the two known host-locale
+  transcode failures at `tests_string_transcode.hpp` lines 138 and 248; no
+  Pattern capability or proposal-review regression was reported.
