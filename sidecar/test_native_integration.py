@@ -30,7 +30,10 @@ class NativeIntegrationTests(unittest.TestCase):
         while not report.exists() and time.monotonic() < deadline and app.poll() is None:
             time.sleep(0.1)
         trace = Path(str(report) + ".trace")
-        self.assertTrue(report.exists(), f"No app endpoint, exit={app.poll()}, trace={trace.read_text() if trace.exists() else 'none'}")
+        if not report.exists():
+            app.kill()
+            app.wait()
+            self.fail(f"No app endpoint, exit={app.returncode}, trace={trace.read_text() if trace.exists() else 'none'}")
         return app, trace, json.loads(report.read_text())
 
     def assert_audio_path_clean(self, trace):
@@ -56,6 +59,44 @@ class NativeIntegrationTests(unittest.TestCase):
         except subprocess.TimeoutExpired:
             app.kill()
             app.wait()
+
+    def exchange_sidecar(self, endpoint, calls):
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": {"name": "native-restart-test", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        ]
+        for request_id, (name, arguments) in enumerate(calls, 2):
+            messages.append({"jsonrpc": "2.0", "id": request_id, "method": "tools/call",
+                             "params": {"name": name, "arguments": arguments}})
+        process = subprocess.run(
+            [sys.executable, str(ROOT / "sidecar/openmpt_mcp.py"),
+             "--pipe", endpoint["pipe"], "--instance", endpoint["instance"],
+             "--document", endpoint["document"]],
+            input="".join(json.dumps(message) + "\n" for message in messages),
+            text=True, encoding="utf-8", capture_output=True, timeout=15,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        return [json.loads(line)["result"] for line in process.stdout.splitlines()][1:]
+
+    def test_sidecar_restart_releases_retained_occupancy(self):
+        """Issue 31 AC4: process loss leaves no app state that blocks reattach."""
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-") as directory:
+            report = Path(directory) / "endpoint.json"
+            stop = Path(directory) / "stop"
+            app, _, endpoint = self.start_app(report, stop, 0)
+            try:
+                first = self.exchange_sidecar(endpoint, [("get_pattern_context", {"occupy": True})])
+                self.assertTrue(first[0]["structuredContent"]["ok"], first)
+
+                # EOF terminates the first client-supervised Sidecar. A fresh
+                # process must explicitly attach and be able to occupy again.
+                second = self.exchange_sidecar(endpoint, [("get_pattern_context", {})])
+                result = second[0]["structuredContent"]
+                self.assertTrue(result["ok"], result)
+            finally:
+                self.stop_app(app, stop)
 
     def test_both_directions_through_real_sidecar_and_app(self):
         for pattern, channels in ((0, [1, 2]), (1, [0])):

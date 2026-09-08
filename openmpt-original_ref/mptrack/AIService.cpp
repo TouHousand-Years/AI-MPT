@@ -72,6 +72,9 @@ struct Request
 	std::mutex mutex;
 	std::condition_variable ready;
 	bool done = false;
+	// Identity of the broker connection the request arrived on; the UI thread
+	// uses it to attribute attachment state to this connection (ticket 31).
+	uint64 connection = 0;
 	void Complete(Json result)
 	{
 		std::lock_guard lock(mutex);
@@ -81,6 +84,15 @@ struct Request
 	}
 };
 
+// A client connection that had explicitly attached was disconnected. The
+// broker never looks at documents or capabilities; it only reports the
+// connection identity, and the owning/UI thread decides what to release.
+struct DisconnectNotice
+{
+	uint64 connection = 0;
+	std::string instance;
+};
+
 // The broker only handles bytes and envelopes. It has no document pointers.
 class Broker
 {
@@ -88,6 +100,9 @@ class Broker
 	std::thread m_worker;
 	std::mutex m_mutex;
 	std::deque<std::shared_ptr<Request>> m_queue;
+	std::mutex m_disconnectMutex;
+	std::deque<DisconnectNotice> m_disconnects;
+	uint64 m_nextConnection = 0;
 	std::wstring m_name;
 	std::function<Json()> m_directCall;
 	std::atomic<bool> m_running = false;
@@ -160,6 +175,7 @@ class Broker
 		m_running = true;
 		while(WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
 		{
+			const uint64 connection = ++m_nextConnection;
 			OVERLAPPED connect{};
 			connect.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 			BOOL connected = ConnectNamedPipe(pipe, &connect);
@@ -205,6 +221,7 @@ class Broker
 					{
 						auto request = std::make_shared<Request>();
 						request->envelope = envelope;
+						request->connection = connection;
 						{ std::lock_guard lock(m_mutex); m_queue.push_back(request); }
 						std::unique_lock lock(request->mutex);
 						IpcThreadScope ipc;
@@ -226,6 +243,15 @@ class Broker
 				length = static_cast<DWORD>(bytes.size());
 				if(!IO(pipe, &length, 4, true) || !IO(pipe, bytes.data(), length, true)) break;
 			}
+			// Ticket 31 AC4: an attached client vanishing must leave no residue.
+			// The owning thread drains this notice and releases exactly the state
+			// bound to this connection; a later reattach on a new connection is
+			// never touched by this stale identity.
+			if(!attachedInstance.empty())
+			{
+				std::lock_guard lock(m_disconnectMutex);
+				m_disconnects.push_back({connection, attachedInstance});
+			}
 			DisconnectNamedPipe(pipe);
 		}
 		m_running = false;
@@ -245,6 +271,12 @@ public:
 		if(m_queue.empty()) return {};
 		auto result = m_queue.front(); m_queue.pop_front(); return result;
 	}
+	std::optional<DisconnectNotice> PopDisconnect()
+	{
+		std::lock_guard lock(m_disconnectMutex);
+		if(m_disconnects.empty()) return {};
+		auto result = m_disconnects.front(); m_disconnects.pop_front(); return result;
+	}
 };
 
 CViewPattern *PatternView(CModDoc &doc)
@@ -263,6 +295,8 @@ public:
 	{
 		std::unique_ptr<PatternCapability> capability;
 		CModDoc *document = nullptr;
+		// Broker connection id of the attachment that created the capability.
+		uint64 connection = 0;
 		std::mutex mutex;
 	};
 	std::unique_ptr<Broker> broker;
@@ -275,6 +309,8 @@ public:
 	CListBox evidence;
 	std::vector<std::unique_ptr<CButton>> buttons;
 	std::string instance;
+	// Broker connection id whose attachment owns the current session state.
+	uint64 attachedConnection = 0;
 	std::wstring pipe;
 	Json review;
 	CString identityText;
@@ -368,7 +404,27 @@ public:
 		if(capability) capability->ForceRelease();
 		if(pending) { pending->Complete(Failure("occupancyLost", "Human released the session")); pending.reset(); }
 	}
-	Json Dispatch(const Json &envelope)
+	void HandleDisconnect(const DisconnectNotice &notice)
+	{
+		// Ticket 31 AC4: process loss leaves no app residue. Release only the
+		// state bound to this exact attachment; if a newer client already
+		// attached on another connection, this stale notice must not touch it.
+		if(notice.instance != instance || notice.connection != attachedConnection) return;
+		attachedConnection = 0;
+		// Unhanded retained work and pending requests die with their connection.
+		if(pending) { pending->Complete(Failure("occupancyLost", "Client disconnected")); pending.reset(); }
+		// A proposal frozen by handoff_for_review belongs to human review and
+		// must survive the client; only a proposal-free capability is released.
+		if(capability && !capability->HasProposal()) { capability.reset(); document = nullptr; RefreshReview(); }
+		std::lock_guard lock(threadProbe.mutex);
+		if(threadProbe.connection == notice.connection)
+		{
+			threadProbe.capability.reset();
+			threadProbe.document = nullptr;
+			threadProbe.connection = 0;
+		}
+	}
+	Json Dispatch(const Json &envelope, uint64 connection)
 	{
 		if(!theApp.InGuiThread()) return Failure("owningThreadRequired", "Use document owning thread", "dispatch");
 		if(envelope.at("instance") != instance) return Failure("instanceGone", "Instance identity no longer exists", "attachment");
@@ -380,6 +436,8 @@ public:
 			std::lock_guard lock(threadProbe.mutex);
 			threadProbe.capability = std::make_unique<PatternCapability>(*target, PATTERNINDEX_INVALID, std::nullopt);
 			threadProbe.document = target;
+			threadProbe.connection = connection;
+			attachedConnection = connection;
 			return {{"ok", true}};
 		}
 		if(envelope.at("operation") != "call") return Failure("schemaFailure", "Unknown operation", "transport");
@@ -531,6 +589,12 @@ public:
 			if(capability && capability->Occupied() && IsIconic()) ShowWindow(SW_SHOWNOACTIVATE);
 			if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
 			if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
+			// Ticket 31 AC4: drain disconnect notices before new work so a
+			// vanished client's occupancy is released before its successor's
+			// reattach is dispatched.
+			if(broker)
+				while(auto notice = broker->PopDisconnect())
+					HandleDisconnect(*notice);
 			if(broker && !pending)
 				if(auto request = broker->Pop())
 				{
@@ -551,7 +615,7 @@ public:
 								}
 						}
 #endif
-						result = Dispatch(request->envelope);
+						result = Dispatch(request->envelope, request->connection);
 					}
 					catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid request", "transport"); }
 					catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }

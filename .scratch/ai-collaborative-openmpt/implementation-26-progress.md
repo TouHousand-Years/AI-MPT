@@ -6,7 +6,8 @@ Label: triage
 
 The owner requested implementation and a pause **before manual functional
 verification**. No manual verification, playback, Save As/reopen or keep-verdict
-has been performed. Issue 26 and issues 27, 29–34 remain open.
+has been performed. Issue 26 and issues 27, 29–30 and 32–34 remain open;
+issue 31 was resolved on 2026-09-08 (see the update below).
 
 ## Delivered in this attempt
 
@@ -16,7 +17,8 @@ has been performed. Issue 26 and issues 27, 29–34 remain open.
   translation behavior only; no native facade or real application endpoint is
   present.
 - Sidecar README records the proposed app envelope and the integration work
-  still required. Issue 31 is **not** accepted or resolved.
+  still required. At the time of this attempt issue 31 was **not** accepted or
+  resolved; it was resolved on 2026-09-08 (see the update below).
 
 Verification: `python -m unittest discover -s sidecar -v` — 10 tests passed;
 `python -m py_compile sidecar/openmpt_mcp.py sidecar/test_sidecar.py` passed.
@@ -35,12 +37,14 @@ confirmed both fixes and reported no remaining findings.
 
 Independent code-review spec agent found one consolidated partial-delivery
 finding: the translator does not supply issue 26's end-to-end working loop or
-issue 31's connection to the real app endpoint. This remains unresolved and is
-explicitly documented here. No scope creep or demonstrated semantic violation
-was found in the delivered translator.
+issue 31's connection to the real app endpoint. This was unresolved at review
+time; the issue-31 connection was resolved on 2026-09-08 (see the update
+below), while issue 26's end-to-end working loop remains open. No scope creep
+or demonstrated semantic violation was found in the delivered translator.
 
 Review result: Standards 0 remaining findings; Spec 1 remaining finding
-(incomplete native implementation and integration).
+(incomplete native implementation and integration; the issue-31 portion of
+this finding was resolved on 2026-09-08).
 
 ## Build prerequisite blocker
 
@@ -73,3 +77,28 @@ broker, occupancy write guards and AI/MCP UI. Maintain the existing Piano Roll
 pane in the development line. Then connect the Sidecar to the real app, review
 and compile the complete change, and prepare the owner checklist. Pause before
 the owner's functional acceptance; do not mark the spec complete without it.
+
+## Update 2026-09-08: issue 31 resolved
+
+- The official MCP Inspector CLI, used as a real MCP client, launched
+  `python sidecar/openmpt_mcp.py` over stdio, listed exactly the five
+  Pattern-mode tools, returned `notAttached` when launched without explicit
+  `--pipe`/`--instance`/`--document`, and completed a real
+  `get_pattern_context` against running OpenMPT with
+  `test-fixtures/ai-collab-fixture.mptm` pattern 0 (`ok`, `isError: false`,
+  Score Context rows=128, channels=4, instruments E-Piano / Warm Pad /
+  Round Bass).
+- TDD AC4 RED: a Sidecar that obtained `occupy=true` and then exited left
+  retained occupancy; a fresh explicitly attached Sidecar received a
+  capability/busy failure. Fixed in `AIService.cpp`: the broker assigns
+  monotonic connection ids and queues identity-only disconnect notices; the
+  UI/owning thread drains disconnects before new requests and releases
+  unhanded state only for the matching connection, so a stale notice cannot
+  affect a newer connection and a handed-off human proposal survives.
+- A native Sidecar restart test was added; startup-failure cleanup now kills
+  and waits for the child process.
+- Verification: `.\build-local.ps1` PASS; native suite 3 tests OK; sidecar
+  discover suite 25 OK with 3 opt-in tests skipped in the non-native run;
+  official Inspector real call PASS. Issue 31's four acceptance criteria are
+  met; issue 26 itself remains open, paused before the owner's manual
+  functional verification.

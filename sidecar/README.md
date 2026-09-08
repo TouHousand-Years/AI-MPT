@@ -1,9 +1,9 @@
 # Pattern MCP Sidecar
 
-Status: translator + app-side IPC endpoint implemented (issue 30); MCP client wiring is issue 31.
+Status: implemented (issues 30 and 31); verified with the official MCP Inspector CLI.
 Label: triage
 
-`openmpt_mcp.py` is the translator portion of issue 31 under issue 26: it maps
+`openmpt_mcp.py` implements issue 31 under issue 26: it maps
 MCP tools to the protocol-neutral app envelope over the app's named pipe. The
 app side it speaks to is implemented: the running OpenMPT application exposes a
 current-user named pipe (`AIService.cpp`), the broker validates and queues
@@ -38,6 +38,27 @@ It drives all five tools through the running app, walks the guided failure
 cases (`notAttached`, `documentGone`, `owningThreadRequired`, `instanceGone`),
 and asserts from the integration trace that no AI IPC path executed on the
 realtime audio callback while playback and IPC traffic ran concurrently.
+
+## Official MCP Inspector CLI examples
+
+The official [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+CLI is a real MCP client and was used to verify this Sidecar end to end:
+
+```powershell
+npx --yes @modelcontextprotocol/inspector --cli python C:\<abs>\sidecar\openmpt_mcp.py --pipe <pipe> --instance <instance> --document <document> -- --method tools/list --format json
+
+npx --yes @modelcontextprotocol/inspector --cli python C:\<abs>\sidecar\openmpt_mcp.py --pipe <pipe> --instance <instance> --document <document> -- --method tools/call --tool-name get_pattern_context --tool-arg occupy=true --format json
+```
+
+The Sidecar target flags (`--pipe`, `--instance`, `--document`) appear before
+the bare `--` and are given to the launched Sidecar process; the flags after
+the bare `--` are Inspector's own flags (`--method`, `--tool-name`,
+`--tool-arg`, `--format`), selecting the MCP operation to run. In the launch
+command, `--cli` selects Inspector's CLI mode and `python` plus the absolute
+script path launch the Sidecar as the MCP server. `tools/list` returns exactly
+the five Pattern-mode tools; `tools/call get_pattern_context` against the
+running app with the issue-28 fixture open returned the real Score Context in
+`structuredContent`.
 
 ## Probe client for the owner demo (issue 30)
 
