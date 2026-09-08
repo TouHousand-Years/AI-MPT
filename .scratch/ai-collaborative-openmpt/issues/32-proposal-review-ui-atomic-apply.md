@@ -53,3 +53,22 @@ Verification:
 - `libopenmpt_test.exe` — completed with only the two known host-locale
   transcode failures at `tests_string_transcode.hpp` lines 138 and 248; no
   Pattern capability or proposal-review regression was reported.
+
+## Code review — 2026-09-08
+
+Two independent read-only reviews compared the ticket-32 change with starting
+point `3d90d5db2`. The Standards axis found no documented-standard violation;
+its judgement-only notes concerned repeated test serialization/error access
+and literal configuration values. The Spec axis found no scope creep and no
+incorrect implementation. It identified that the first test revision sampled
+only changed cells for the pre-Apply and failure invariants, so the tests were
+strengthened to snapshot and compare the complete Pattern for pre-Apply,
+failed-Apply, and Reject behavior. A shared error-code helper also removes the
+reported repeated JSON navigation.
+
+The remaining review observations preserve the owner-confirmed seam decision:
+the AI panel's Tracker list and its synchronized Baseline / Proposal / Current
+pitch-time projections are the issue-32 review evidence; the main editor's
+Piano Roll remains a live Tracker Pattern editor. UI presentation and normal
+playback after Apply remain owner-manual acceptance checks under the parent
+ticket rather than GUI automation seams.

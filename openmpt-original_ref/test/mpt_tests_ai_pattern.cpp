@@ -12,6 +12,7 @@ namespace Test
 {
 static void Require(bool condition, const char *message) { if(!condition) throw std::runtime_error(message); }
 static bool OK(const AI::Json &r) { return r.at("ok").get<bool>(); }
+static std::string ErrorCode(const AI::Json &result) { return result.at("error").at("code").get<std::string>(); }
 static AI::Json Cell(int note, int instrument = 2, int volume = 40)
 {
 	return {{"note", note}, {"instrument", instrument}, {"volume_command", 1}, {"volume", volume}, {"effect_command", 0}, {"effect_parameter", 0}};
@@ -83,6 +84,8 @@ void AIPatternTests(const CString &fixture)
 	{
 		auto &sf = doc->GetSoundFile();
 		const auto original = *sf.Patterns[0].GetpModCommand(0, 1);
+		const size_t patternCellCount = size_t(sf.Patterns[0].GetNumRows()) * sf.GetNumChannels();
+		const std::vector<ModCommand> documentBaseline(sf.Patterns[0].GetpModCommand(0, 0), sf.Patterns[0].GetpModCommand(0, 0) + patternCellCount);
 		AI::PatternCapability cap(*doc, 0, {});
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(doc->AIOccupied(), "Retained read locks the document");
@@ -108,18 +111,19 @@ void AIPatternTests(const CString &fixture)
 			Require(Raw(live) == change["before"], "Before Apply the current document equals every baseline cell");
 		}
 		Require(doc->AIRevision() == revisionBeforeHandoff, "Review handoff does not change the document revision");
+		Require(std::equal(documentBaseline.begin(), documentBaseline.end(), sf.Patterns[0].GetpModCommand(0, 0)), "Before Apply the complete current Pattern equals the baseline");
 		if(const wchar_t *demo = _wgetenv(L"OPENMPT_AI_DEMO_REPORT"))
 			std::ofstream(demo) << AI::Json{{"accumulated_candidate_diff", handoff["diff"]}, {"final_proposal", proposal}}.dump(2) << '\n';
 		const auto revision = doc->AIRevision();
 		const auto undoName = doc->GetPatternUndo().GetUndoName();
 		const auto immutableProposal = cap.Review();
 		const auto partial = cap.Apply(false);
-		Require(!OK(partial) && partial["error"]["code"] == "unsupported", "Partial acceptance unsupported");
+		Require(!OK(partial) && ErrorCode(partial) == "unsupported", "Partial acceptance unsupported");
 		Require(cap.HasProposal() && cap.Review() == immutableProposal, "Unsupported partial acceptance preserves the immutable proposal");
 		const auto commitFailure = cap.Apply(true, true);
-		Require(!OK(commitFailure) && commitFailure["error"]["code"] == "commitFailed", "Simulated commit failure rejected");
+		Require(!OK(commitFailure) && ErrorCode(commitFailure) == "commitFailed", "Simulated commit failure rejected");
 		Require(doc->AIRevision() == revision && doc->GetPatternUndo().GetUndoName() == undoName, "Failed Apply leaves revision and Undo untouched");
-		Require(*sf.Patterns[0].GetpModCommand(0, 1) == original, "Failed Apply leaves Pattern untouched");
+		Require(std::equal(documentBaseline.begin(), documentBaseline.end(), sf.Patterns[0].GetpModCommand(0, 0)), "Failed Apply leaves every Pattern cell untouched");
 		Require(cap.HasProposal() && cap.Review() == immutableProposal, "Failed Apply preserves the same immutable proposal for retry");
 		Require(OK(cap.Apply()), "Whole proposal applies");
 		Require(doc->AIRevision() == revision + 1, "Apply increments revision exactly once");
@@ -131,7 +135,11 @@ void AIPatternTests(const CString &fixture)
 		cap.Call("replace_pattern_segment", Segment(token, 1, 50));
 		cap.Call("handoff_for_review", {{"session", token}});
 		const auto revisionBeforeReject = doc->AIRevision();
-		Require(OK(cap.Reject()) && doc->AIRevision() == revisionBeforeReject && doc->GetPatternUndo().CanRedo(), "Reject preserves revision and redo history");
+		const auto undoBeforeReject = doc->GetPatternUndo().GetUndoName();
+		const std::vector<ModCommand> patternBeforeReject(sf.Patterns[0].GetpModCommand(0, 0), sf.Patterns[0].GetpModCommand(0, 0) + patternCellCount);
+		Require(OK(cap.Reject()) && doc->AIRevision() == revisionBeforeReject && doc->GetPatternUndo().CanRedo()
+			&& doc->GetPatternUndo().GetUndoName() == undoBeforeReject, "Reject preserves revision and Undo/Redo history");
+		Require(std::equal(patternBeforeReject.begin(), patternBeforeReject.end(), sf.Patterns[0].GetpModCommand(0, 0)), "Reject leaves every Pattern cell unchanged");
 		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(doc->GetPatternUndo().Redo() == PATTERNINDEX_INVALID && doc->GetPatternUndo().CanRedo(), "Native Redo is blocked during retained occupancy");
 		cap.Call("replace_pattern_segment", Segment(token, 1, 50));
@@ -139,7 +147,7 @@ void AIPatternTests(const CString &fixture)
 		const auto currentProposal = cap.Review();
 		const auto saved = *sf.Patterns[0].GetpModCommand(0, 0);
 		sf.Patterns[0].GetpModCommand(0, 0)->note++;
-		Require(cap.Apply()["error"]["code"] == "stale" && cap.HasProposal(), "Stale proposal refused and retained");
+		Require(ErrorCode(cap.Apply()) == "stale" && cap.HasProposal(), "Stale proposal refused and retained");
 		const auto staleProposal = cap.Review();
 		Require(staleProposal["status"] == "stale" && staleProposal["diff"] == currentProposal["diff"], "Stale proposal remains immutable and available read-only without rebasing");
 		*sf.Patterns[0].GetpModCommand(0, 0) = saved; cap.Reject();
@@ -188,8 +196,8 @@ void AIPatternTests(const CString &fixture)
 		Require(cap.Call("replace_pattern_segment", Segment(token, 1, 49)).value("pending_approval", false) && cap.PendingExpansion(), "Expansion approval is pending before human release");
 		cap.ForceRelease();
 		Require(!cap.Occupied() && !cap.PendingExpansion() && !doc->AIOccupied(), "Human release clears retained occupancy and the pending approval");
-		Require(cap.ResolveExpansion(true)["error"]["code"] == "occupancyLost"
-			&& cap.Call("get_pattern_context", {{"session", token}})["error"]["code"] == "occupancyLost", "Human release invalidates the approval and session token");
+		Require(ErrorCode(cap.ResolveExpansion(true)) == "occupancyLost"
+			&& ErrorCode(cap.Call("get_pattern_context", {{"session", token}})) == "occupancyLost", "Human release invalidates the approval and session token");
 		Require(*sf.Patterns[0].GetpModCommand(0, 1) == live && doc->AIRevision() == revision
 			&& doc->GetPatternUndo().GetUndoName() == undoName, "Human release during approval changes no document or Undo state");
 	}
@@ -198,7 +206,7 @@ void AIPatternTests(const CString &fixture)
 		cap.Configure(300, false);
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(cap.Call("replace_pattern_segment", Segment(token, 1, 49)).value("pending_approval", false), "Ask-each-time preference prompts for expansion");
-		Require(cap.ResolveExpansion(false)["error"]["code"] == "rangeRejected", "Owner can decline the prompted expansion");
+		Require(ErrorCode(cap.ResolveExpansion(false)) == "rangeRejected", "Owner can decline the prompted expansion");
 		cap.Configure(300, true);
 		const auto expanded = cap.Call("replace_pattern_segment", Segment(token, 1, 49));
 		Require(OK(expanded) && !expanded.contains("pending_approval"), "Changing to always-approve affects the subsequent expansion request");
