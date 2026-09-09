@@ -240,6 +240,7 @@ BEGIN_MESSAGE_MAP(CModControlView, CView)
 	ON_MESSAGE(WM_DPICHANGED_AFTERPARENT,  &CModControlView::OnDPIChangedAfterParent)
 	ON_NOTIFY(TCN_SELCHANGE, IDC_TABCTRL1, &CModControlView::OnTabSelchange)
 	ON_MESSAGE(WM_MOD_ACTIVATEVIEW,        &CModControlView::OnActivateModView)
+	ON_MESSAGE(WM_MOD_MDIACTIVATE,         &CModControlView::OnModMDIActivate)
 	ON_MESSAGE(WM_MOD_CTRLMSG,             &CModControlView::OnModCtrlMsg)
 	ON_COMMAND(ID_EDIT_CUT,                &CModControlView::OnEditCut)
 	ON_COMMAND(ID_EDIT_COPY,               &CModControlView::OnEditCopy)
@@ -300,7 +301,13 @@ void CModControlView::RecalcLayout()
 
 	if (m_TabCtrl.m_hWnd == NULL) return;
 	GetClientRect(&rcClient);
-	if(CWnd *pDlg = GetCurrentControlDlg())
+	if(m_nActiveDlg == Page::AI)
+	{
+		CRect rect = rcClient;
+		m_TabCtrl.AdjustRect(FALSE, &rect);
+		m_TabCtrl.MoveWindow(&rcClient);
+		AI::LayoutPanel(*this, rect);
+	} else if(CWnd *pDlg = GetCurrentControlDlg())
 	{
 		CRect rect = rcClient;
 		m_TabCtrl.AdjustRect(FALSE, &rect);
@@ -342,51 +349,99 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 	CModControlDlg *pDlg = nullptr;
 
 	if(page == Page::Unknown)
-		page = static_cast<Page>(m_TabCtrl.GetCurSel());
-
-	const UINT nID = static_cast<UINT>(m_TabCtrl.GetItemData(static_cast<int>(page)));
-	if(nID == 0)
-		return false;
-
-	switch(nID)
 	{
-		case IDD_CONTROL_COMMENTS:
-			page = Page::Comments;
-			break;
-		case IDD_CONTROL_GLOBALS:
-			page = Page::Globals;
-			break;
-		case IDD_CONTROL_PATTERNS:
-			page = Page::Patterns;
-			break;
-		case IDD_CONTROL_SAMPLES:
-			page = Page::Samples;
-			break;
-		case IDD_CONTROL_INSTRUMENTS:
-			page = Page::Instruments;
-			break;
-		default:
-			return false;
+		const int sel = m_TabCtrl.GetCurSel();
+		if(sel < 0) return false;
+		switch(static_cast<UINT>(m_TabCtrl.GetItemData(sel)))
+		{
+		case IDD_CONTROL_COMMENTS: page = Page::Comments; break;
+		case IDD_CONTROL_GLOBALS: page = Page::Globals; break;
+		case IDD_CONTROL_PATTERNS: page = Page::Patterns; break;
+		case IDD_CONTROL_SAMPLES: page = Page::Samples; break;
+		case IDD_CONTROL_INSTRUMENTS: page = Page::Instruments; break;
+		case AI::PanelPageId: page = Page::AI; break;
+		default: return false;
+		}
+	}
+
+	UINT nID = 0;
+	switch(page)
+	{
+	case Page::Comments: nID = IDD_CONTROL_COMMENTS; break;
+	case Page::Globals: nID = IDD_CONTROL_GLOBALS; break;
+	case Page::Patterns: nID = IDD_CONTROL_PATTERNS; break;
+	case Page::Samples: nID = IDD_CONTROL_SAMPLES; break;
+	case Page::Instruments: nID = IDD_CONTROL_INSTRUMENTS; break;
+	case Page::AI: nID = AI::PanelPageId; break;
+	default: return false;
 	}
 
 	if(page < Page::First || page >= Page::NumPages || !pMainFrm)
 		return false;
 
+	// The Page enum is serialized and must not be used as the physical tab index:
+	// a module without instruments has no Instruments tab. Find the tab by ID.
+	int tabIndex = -1;
+	for(int i = 0; i < m_TabCtrl.GetItemCount(); i++)
+	{
+		if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == nID)
+		{
+			tabIndex = i;
+			break;
+		}
+	}
+	if(tabIndex < 0)
+		return false;
+	m_TabCtrl.SetCurSel(tabIndex);
+
 	CModControlDlg *oldActiveDlg = GetCurrentControlDlg();
 	if(oldActiveDlg)
 		oldActiveDlg->GetSplitPosRef() = static_cast<CChildFrame *>(GetParentFrame())->GetSplitterHeight();
+	else if(m_nActiveDlg == Page::AI)
+		m_aiSplitterHeight = static_cast<CChildFrame *>(GetParentFrame())->GetSplitterHeight();
 
 	if(page == m_nActiveDlg)
 	{
-		pDlg = oldActiveDlg;
-		PostMessage(WM_MOD_CTRLMSG, CTRLMSG_ACTIVATEPAGE, lParam);
+		if(page == Page::AI)
+		{
+			CRect rect;
+			GetClientRect(&rect);
+			m_TabCtrl.AdjustRect(FALSE, &rect);
+			AI::AttachPanel(*this, rect);
+			RecalcLayout();
+		} else
+		{
+			pDlg = oldActiveDlg;
+			PostMessage(WM_MOD_CTRLMSG, CTRLMSG_ACTIVATEPAGE, lParam);
+		}
 		return true;
 	}
+
+	if(m_nActiveDlg == Page::AI)
+		AI::DetachPanel(this);
 	if(oldActiveDlg)
 	{
+		m_lastControlDlg = oldActiveDlg;
 		OnModCtrlMsg(CTRLMSG_DEACTIVATEPAGE, 0);
 		oldActiveDlg->ShowWindow(SW_HIDE);
 	}
+
+	if(page == Page::AI)
+	{
+		m_nActiveDlg = Page::AI;
+		pMainFrm->SetUserText(_T(""));
+		pMainFrm->SetInfoText(_T(""));
+		pMainFrm->SetXInfoText(_T(""));
+		CRect rect;
+		GetClientRect(&rect);
+		m_TabCtrl.AdjustRect(FALSE, &rect);
+		AI::AttachPanel(*this, rect);
+		if(CChildFrame *pFrame = static_cast<CChildFrame *>(GetParentFrame()))
+			pFrame->SetSplitterHeight(m_aiSplitterHeight > 1 ? m_aiSplitterHeight : 560);
+		RecalcLayout();
+		return true;
+	}
+
 	if(m_Pages[static_cast<size_t>(page)]) // Ctrl window already created?
 	{
 		m_nActiveDlg = page;
@@ -426,6 +481,7 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		m_nActiveDlg = page;
 		m_Pages[static_cast<size_t>(page)] = pDlg;
 	}
+	m_lastControlDlg = pDlg;
 	RecalcLayout();
 	pMainFrm->SetUserText(_T(""));
 	pMainFrm->SetInfoText(_T(""));
@@ -440,7 +496,10 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 
 void CModControlView::OnDestroy()
 {
+	// Detach before this view (and with it the embedded panel) is destroyed.
+	AI::DetachPanel(this);
 	m_nActiveDlg = Page::Unknown;
+	m_lastControlDlg = nullptr;
 	for(auto &pDlg : m_Pages)
 	{
 		if(pDlg)
@@ -463,7 +522,7 @@ void CModControlView::UpdateView(UpdateHint lHint, CObject *pObject)
 	// Module type changed: update tabs
 	if (lHint.GetType()[HINT_MODTYPE])
 	{
-		UINT nCount = 4;
+		UINT nCount = 5;
 		UINT mask = 1 | 2 | 4 | 16;
 
 		if(pDoc->GetSoundFile().GetModSpecifications().instrumentsMax > 0 || pDoc->GetNumInstruments() > 0)
@@ -485,6 +544,12 @@ void CModControlView::UpdateView(UpdateHint lHint, CObject *pObject)
 			if (mask & 8) m_TabCtrl.InsertItem(count++, _T("Instruments"), IDD_CONTROL_INSTRUMENTS, IMAGE_INSTRUMENTS);
 			//if (mask & 32) m_TabCtrl.InsertItem(count++, _T("Graph"), IDD_CONTROL_GRAPH, IMAGE_GRAPH); //rewbs.graph
 			if (mask & 16) m_TabCtrl.InsertItem(count++, _T("Comments"), IDD_CONTROL_COMMENTS, IMAGE_COMMENTS);
+			m_TabCtrl.InsertItem(count++, _T("AI / MCP"), AI::PanelPageId, IMAGE_GENERAL);
+			if(m_nActiveDlg == Page::AI)
+			{
+				for(int i = 0; i < m_TabCtrl.GetItemCount(); i++)
+					if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == AI::PanelPageId) { m_TabCtrl.SetCurSel(i); break; }
+			}
 		}
 	}
 	// Update child dialogs
@@ -500,9 +565,19 @@ void CModControlView::UpdateView(UpdateHint lHint, CObject *pObject)
 
 void CModControlView::OnTabSelchange(NMHDR*, LRESULT* pResult)
 {
-	SetActivePage(static_cast<Page>(m_TabCtrl.GetCurSel()));
+	SetActivePage(Page::Unknown);
 	if(pResult)
 		*pResult = 0;
+}
+
+
+LRESULT CModControlView::OnModMDIActivate(WPARAM, LPARAM)
+{
+	// The AI panel is a singleton shared by all documents; re-claim it when this
+	// document becomes active while its AI page is selected.
+	if(m_nActiveDlg == Page::AI)
+		SetActivePage(Page::AI);
+	return 0;
 }
 
 
@@ -516,9 +591,8 @@ LRESULT CModControlView::OnActivateModView(WPARAM nIndex, LPARAM lParam)
 
 	if (m_TabCtrl.m_hWnd)
 	{
-		if (static_cast<Page>(nIndex) < Page::NumPages)
+		if (nIndex < static_cast<WPARAM>(Page::NumPages))
 		{
-			m_TabCtrl.SetCurSel(static_cast<int>(nIndex));
 			SetActivePage(static_cast<Page>(nIndex), lParam);
 		} else
 		// Might be a dialog id IDD_XXXX
@@ -529,7 +603,9 @@ LRESULT CModControlView::OnActivateModView(WPARAM nIndex, LPARAM lParam)
 				if (static_cast<WPARAM>(m_TabCtrl.GetItemData(i)) == nIndex)
 				{
 					m_TabCtrl.SetCurSel(i);
-					SetActivePage(static_cast<Page>(i), lParam);
+					// Resolve the page from the item data: the physical tab index is not
+					// the Page value for modules without an Instruments tab.
+					SetActivePage(Page::Unknown, lParam);
 					break;
 				}
 			}

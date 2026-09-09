@@ -123,6 +123,8 @@ public:
 		Samples,
 		Instruments,
 		Comments,
+		// Appended after the serialized values so existing settings keep their meaning.
+		AI,
 		NumPages
 	};
 
@@ -130,6 +132,11 @@ protected:
 	CModTabCtrl m_TabCtrl;
 	std::array<CModControlDlg *, int(Page::NumPages)> m_Pages = {{}};
 	Page m_nActiveDlg = Page::Unknown;
+	// Last dialog of a regular page; the lower view keeps using it while the AI
+	// page is active, because the AI page deliberately does not change the view class.
+	CModControlDlg *m_lastControlDlg = nullptr;
+	// Splitter height to restore when the AI page is selected again.
+	int m_aiSplitterHeight = 0;
 	int m_nInstrumentChanged = -1;
 	HWND m_hWndView = nullptr, m_hWndMDI = nullptr;
 
@@ -146,6 +153,7 @@ public:
 	void SetMDIParentFrame(HWND hwnd) { m_hWndMDI = hwnd; }
 	void ForceRefresh();
 	CModControlDlg *GetCurrentControlDlg() const;
+	CModControlDlg *GetLastControlDlg() const { return m_lastControlDlg; }
 
 protected:
 	void RecalcLayout();
@@ -178,6 +186,7 @@ protected:
 	afx_msg void OnEditFindNext();
 	afx_msg void OnSwitchToView();
 	afx_msg LRESULT OnActivateModView(WPARAM, LPARAM);
+	afx_msg LRESULT OnModMDIActivate(WPARAM, LPARAM);
 	afx_msg LRESULT OnModCtrlMsg(WPARAM wParam, LPARAM lParam);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
@@ -226,7 +235,16 @@ public:
 	virtual LRESULT OnPlayerNotify(Notification *) { return 0; }
 	//}}AFX_VIRTUAL
 
-	CModControlDlg *GetControlDlg() { return static_cast<CModControlView *>(CWnd::FromHandle(m_hWndCtrl))->GetCurrentControlDlg(); }
+	CModControlDlg *GetControlDlg()
+	{
+		auto *view = static_cast<CModControlView *>(CWnd::FromHandle(m_hWndCtrl));
+		if(!view) return nullptr;
+		if(CModControlDlg *dlg = view->GetCurrentControlDlg())
+			return dlg;
+		// While the AI page is active, the lower view still belongs to the last
+		// regular page, whose dialog must stay reachable for key forwarding.
+		return view->GetLastControlDlg();
+	}
 
 	void SaveLastFocusItem(HWND hwnd);
 

@@ -1643,7 +1643,6 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 	}
 #endif
 	AI::Start(*pMainFrame);
-	pMainFrame->GetMenu()->AppendMenu(MF_STRING, AI::ShowPanelCommand, _T("AI / MCP"));
 	pMainFrame->UpdateDocumentCount();
 	pMainFrame->ShowWindow(m_nCmdShow);
 	pMainFrame->UpdateWindow();

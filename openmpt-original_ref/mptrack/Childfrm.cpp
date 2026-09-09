@@ -10,6 +10,7 @@
 
 #include "stdafx.h"
 #include "Childfrm.h"
+#include "AIService.h"
 #include "ChannelManagerDlg.h"
 #include "Ctrl_ins.h"
 #include "Ctrl_pat.h"
@@ -106,6 +107,10 @@ void CChildFrame::SetSplitterHeight(int cy)
 	if (cy <= 1) cy = 188;	//default to 188? why not..
 	cy = HighDPISupport::ScalePixels(cy, m_hWnd);
 	m_wndSplitter.SetRowInfo(0, cy, 15);
+	// The AI page does not change the lower view class, so the row info has to be
+	// applied immediately instead of waiting for a view class change.
+	if(m_wndSplitter.GetSafeHwnd())
+		m_wndSplitter.RecalcLayout();
 }
 
 
@@ -480,6 +485,9 @@ void CChildFrame::DeserializeView(FileReader &file)
 	case CModControlView::Page::Comments:
 		pageDlg = IDD_CONTROL_COMMENTS;
 		break;
+	case CModControlView::Page::AI:
+		pageDlg = AI::PanelPageId;
+		break;
 	case CModControlView::Page::Unknown:
 	case CModControlView::Page::NumPages:
 		break;
@@ -502,6 +510,7 @@ void CChildFrame::DeserializeView(FileReader &file)
 		case CModControlView::Page::Samples:     m_ViewSamples.Deserialize(chunk); break;
 		case CModControlView::Page::Instruments: m_ViewInstruments.Deserialize(chunk); break;
 		case CModControlView::Page::Comments:    m_ViewComments.Deserialize(chunk); break;
+		case CModControlView::Page::AI:          /* no view state */ break;
 		case CModControlView::Page::Unknown:
 		case CModControlView::Page::NumPages:
 			break;

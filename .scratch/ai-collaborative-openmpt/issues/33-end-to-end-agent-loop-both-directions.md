@@ -5,9 +5,9 @@ Label: ready-for-agent
 
 **What to build:** The complete live loop from issue 20 wired together: a real Agent client connects through the MCP Sidecar (31) to the running app (30), works the issue-28 fixture through the capability seam (29) while the owner edits and reviews in the synchronized Tracker/Piano Roll editor (27, 32). Both directions are exercised through the same proposal workflow: the owner edits/selects a main melody and asks the Agent for harmony; then selects harmony and asks for a main melody. Multi-voice results accumulate over several single-voice calls under retained cross-call occupancy; handoff, human whole-proposal review, Apply, playback, Undo, and natural-language feedback retries (fresh revision-bound proposals) all work end to end for the first time on real transport.
 
-**Blocked by:** 27 (Piano Roll pane into the main development line), 28 (MPTM collaboration fixture), 31 (MCP Sidecar process), 32 (Proposal review UI and atomic Apply)
+**Blocked by:** 35 (Retained-occupancy navigation/playback, proposal colours, and AI panel usability defects found in the owner live session). Earlier dependencies 27, 28, 31, and 32 are resolved.
 
-**Status:** ready-for-agent
+**Status:** blocked
 
 ## Acceptance criteria (demo to owner, live session)
 

@@ -318,6 +318,9 @@ public:
 	PatternCursor selectionAnchor;
 	uint64 displayedRevision = 0;
 	CString lastMessage;
+	CRect identityRect, stateRect, listRect, evidenceRect;
+	// Main frame is the safe parking parent while no control view shows the panel.
+	CWnd *parking = nullptr;
 #ifdef ENABLE_TESTS
 	std::wstring testReport;
 	ULONGLONG testDeadline = 0;
@@ -344,8 +347,11 @@ public:
 		GUID guid{}; CoCreateGuid(&guid); wchar_t id[40]{}; StringFromGUID2(guid, id, 40);
 		instance = UTF8(id);
 		pipe = L"\\\\.\\pipe\\OpenMPT-AI-" + std::to_wstring(GetCurrentProcessId()) + L"-" + id;
-		CreateEx(WS_EX_TOOLWINDOW, AfxRegisterWndClass(0, LoadCursor(nullptr, IDC_ARROW), reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)),
-			_T("AI / MCP - Pattern collaboration"), WS_OVERLAPPEDWINDOW, CRect(120, 100, 1220, 850), &owner, 0);
+		parking = &owner;
+		// Issue 35: always a hidden child window. It is never a floating top-level
+		// window; CModControlView attaches it inside its tab client area.
+		CreateEx(0, AfxRegisterWndClass(0, LoadCursor(nullptr, IDC_ARROW), reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)),
+			_T("AI / MCP - Pattern collaboration"), WS_CHILD, CRect(0, 0, 1040, 692), &owner, 0);
 		enable.Create(_T("Enable MCP"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(12, 12, 150, 38), this, Enable);
 		always.Create(_T("Always approve range expansion"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(160, 12, 460, 38), this, AlwaysApprove);
 		timeout.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, CRect(470, 12, 530, 38), this, Timeout);
@@ -367,6 +373,7 @@ public:
 		button(Reject, _T("Reject whole proposal"), CRect(830, 170, 1035, 204));
 		evidence.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, CRect(12, 265, 1040, 460), this, Evidence);
 		evidence.SetFont(CFont::FromHandle(static_cast<HFONT>(GetStockObject(ANSI_FIXED_FONT))));
+		LayoutChildren();
 		if(enable.GetCheck()) broker = CreateBroker();
 		SetTimer(1, 100, nullptr);
 		RefreshIdentity();
@@ -397,6 +404,75 @@ public:
 			identityText = value;
 			identity.SetWindowText(value);
 		}
+	}
+	// Issue 35: the panel is embedded in the tab client area, so every control
+	// is repositioned to the current client size. Rows keep their order and the
+	// critical action buttons stay above the evidence areas at any size.
+	void LayoutChildren()
+	{
+		if(!GetSafeHwnd() || !enable.GetSafeHwnd() || !identity.GetSafeHwnd() || !evidence.GetSafeHwnd()) return;
+		CRect client;
+		GetClientRect(&client);
+		const int cx = std::max<int>(client.Width(), 320);
+		const int cy = std::max<int>(client.Height(), 240);
+		const double sx = std::clamp((cx - 24.0) / (1052.0 - 24.0), 0.4, 2.0);
+		const auto X = [sx](int x) { return static_cast<int>((x - 12) * sx + 12.5); };
+
+		// Vertical budget: top row (26), identity (107), buttons (34), state (45),
+		// evidence list (195) and drawn evidence (205) with their gaps add up to
+		// 692. Shrink the three flexible areas first, then scale everything if
+		// the page becomes smaller than their combined minimum.
+		int identityH = 107, listH = 195, drawnH = 205;
+		if(cy < 692)
+		{
+			const int available = std::max(cy - 185, 0);
+			const int minSum = 45 + 60 + 60, baseFlex = 107 + 195 + 205;
+			if(available >= minSum)
+			{
+				const int span = available - minSum;
+				identityH = 45 + (107 - 45) * span / (baseFlex - minSum);
+				listH = 60 + (195 - 60) * span / (baseFlex - minSum);
+				drawnH = 60 + (205 - 60) * span / (baseFlex - minSum);
+			} else
+			{
+				identityH = std::max(18, 107 * available / baseFlex);
+				listH = std::max(18, 195 * available / baseFlex);
+				drawnH = std::max(18, 205 * available / baseFlex);
+			}
+		}
+		int y = 12;
+		const int topRow = y; y += 26 + 10;
+		const int identityTop = y; y += identityH + 15;
+		const int buttonsTop = y; y += 34 + 11;
+		const int stateTop = y; y += 45 + 5;
+		const int listTop = y; y += listH + 15;
+		const int drawnTop = y;
+
+		identityRect.SetRect(X(12), identityTop, X(1040), identityTop + identityH);
+		stateRect.SetRect(X(12), stateTop, X(1040), stateTop + 45);
+		listRect.SetRect(X(12), listTop, X(1040), listTop + listH);
+		evidenceRect.SetRect(X(12), drawnTop, X(1040), drawnTop + drawnH);
+
+		const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+		enable.SetWindowPos(nullptr, X(12), topRow, std::max(40, X(150) - X(12)), 26, flags);
+		always.SetWindowPos(nullptr, X(160), topRow, std::max(40, X(460) - X(160)), 26, flags);
+		timeout.SetWindowPos(nullptr, X(470), topRow, std::max(30, X(530) - X(470)), 26, flags);
+		identity.SetWindowPos(nullptr, identityRect.left, identityRect.top, identityRect.Width(), identityRect.Height(), flags);
+		evidence.SetWindowPos(nullptr, listRect.left, listRect.top, listRect.Width(), listRect.Height(), flags);
+		const CRect buttonBase[]{CRect(540, 12, 750, 38), CRect(770, 12, 990, 38), CRect(12, 170, 205, 204),
+			CRect(215, 170, 410, 204), CRect(420, 170, 615, 204), CRect(625, 170, 820, 204), CRect(830, 170, 1035, 204)};
+		for(size_t i = 0; i < buttons.size() && i < 7; i++)
+		{
+			const bool top = buttonBase[i].bottom <= 38;
+			buttons[i]->SetWindowPos(nullptr, X(buttonBase[i].left), top ? topRow : buttonsTop,
+				std::max(40, X(buttonBase[i].right) - X(buttonBase[i].left)), top ? 26 : 34, flags);
+		}
+		Invalidate(FALSE);
+	}
+	afx_msg void OnSize(UINT nType, int cx, int cy)
+	{
+		CWnd::OnSize(nType, cx, cy);
+		LayoutChildren();
 	}
 	void ReleaseNow()
 	{
@@ -587,7 +663,6 @@ public:
 #endif
 			RefreshIdentity();
 			if(capability) capability->Tick();
-			if(capability && capability->Occupied() && IsIconic()) ShowWindow(SW_SHOWNOACTIVATE);
 			if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
 			if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
 			// Ticket 31 AC4: drain disconnect notices before new work so a
@@ -622,47 +697,34 @@ public:
 					catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }
 					if(result.value("pending_approval", false)) pending = request;
 					else request->Complete(result);
-					if(capability && (capability->Occupied() || capability->HasProposal())
-#ifdef ENABLE_TESTS
-						&& !testDeadline
-#endif
-					) ShowWindow(SW_SHOWNOACTIVATE);
 					RefreshReview();
 				}
-			// Retained occupancy must stay visible without stealing keyboard focus.
-			if(capability && (capability->Occupied() || capability->HasProposal()))
-				SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 			GetDlgItem(Approve)->EnableWindow(pending != nullptr); GetDlgItem(Decline)->EnableWindow(pending != nullptr);
 			GetDlgItem(Apply)->EnableWindow(capability && capability->HasProposal()); GetDlgItem(Reject)->EnableWindow(capability && capability->HasProposal());
-			InvalidateRect(CRect(12, 215, 1040, 260), FALSE);
+			InvalidateRect(stateRect, FALSE);
 		} catch(...) { lastMessage = _T("AI service error."); }
-	}
-	afx_msg void OnClose()
-	{
-		if(capability && capability->Occupied()) { lastMessage = _T("Release AI before hiding this window."); return; }
-		ShowWindow(SW_HIDE);
 	}
 	afx_msg void OnPaint()
 	{
 		CPaintDC dc(this);
-		dc.FillSolidRect(CRect(12, 215, 1040, 260), GetSysColor(COLOR_WINDOW));
+		dc.FillSolidRect(stateRect, GetSysColor(COLOR_WINDOW));
 		CString state = broker && broker->Running() ? _T("MCP ready") : _T("MCP stopped / starting");
 		if(capability && capability->Occupied()) state += pending ? _T(" | AI OCCUPIED - expansion approval waiting (timer paused)") : _T(" | AI OCCUPIED - navigation and playback available; writes blocked");
 		if(review.is_object() && review.contains("status")) state += _T(" | Proposal ") + Text(review["status"].get<std::string>());
-		dc.TextOut(12, 216, state);
+		dc.TextOut(stateRect.left, stateRect.top + 1, state);
 		if(pending && capability)
 		{
 			const auto range = capability->ExpansionRange();
 			CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
 				range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
 				range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
-			dc.TextOut(12, 238, grant);
-		} else dc.TextOut(12, 238, lastMessage);
+			dc.TextOut(stateRect.left, stateRect.top + 23, grant);
+		} else dc.TextOut(stateRect.left, stateRect.top + 23, lastMessage);
 		DrawEvidence(dc);
 	}
 	void DrawEvidence(CDC &dc)
 	{
-		dc.FillSolidRect(CRect(12, 475, 1040, 680), RGB(25, 28, 35));
+		dc.FillSolidRect(evidenceRect, RGB(25, 28, 35));
 		if(!review.is_object() || !review.contains("diff") || review["diff"].empty()) return;
 		const auto &diff = review["diff"];
 		int first = INT_MAX, last = 0, low = 128, high = 1;
@@ -673,21 +735,24 @@ public:
 			if(const auto live = CurrentCell(cell); live && live->IsNote()) { low = std::min<int>(low, live->note); high = std::max<int>(high, live->note); }
 		}
 		if(low > high) { low = 48; high = 72; }
+		const int column = std::max(1, evidenceRect.Width() / 3);
+		const int plotTop = evidenceRect.top + 20, plotBottom = std::max(plotTop + 1, static_cast<int>(evidenceRect.bottom) - 14);
+		const int plotHeight = plotBottom - plotTop;
 		for(int projection = 0; projection < 3; ++projection)
 		{
-			const int x = 20 + projection * 340;
+			const int x = evidenceRect.left + 8 + projection * column;
 			dc.SetTextColor(RGB(230, 235, 240)); dc.SetBkMode(TRANSPARENT);
-			dc.TextOut(x, 480, projection == 0 ? _T("Baseline") : projection == 1 ? _T("Proposal") : _T("Current document"));
+			dc.TextOut(x, evidenceRect.top + 4, projection == 0 ? _T("Baseline") : projection == 1 ? _T("Proposal") : _T("Current document"));
 			for(const auto &cell : diff)
 			{
 				int note = cell[projection == 0 ? "before" : "after"]["note"].get<int>();
 				if(projection == 2) { const auto live = CurrentCell(cell); note = live ? live->note : 0; }
-				int px = x + (cell["row"].get<int>() - first) * 310 / std::max(1, last - first + 1);
+				int px = x + (cell["row"].get<int>() - first) * std::max(1, column - 30) / std::max(1, last - first + 1);
 				if(note >= 1 && note <= 128)
 				{
-					int py = 645 - (note - low) * 120 / std::max(1, high - low);
+					int py = plotBottom - (note - low) * plotHeight / std::max(1, high - low);
 					dc.FillSolidRect(CRect(px, py, px + 7, py + 6), RGB(100, 180, 240));
-				} else dc.FillSolidRect(CRect(px, 658, px + 5, 663), RGB(240, 165, 70));
+				} else dc.FillSolidRect(CRect(px, plotBottom - 5, px + 5, plotBottom), RGB(240, 165, 70));
 			}
 		}
 	}
@@ -695,7 +760,7 @@ public:
 };
 BEGIN_MESSAGE_MAP(Panel, CWnd)
 	ON_WM_TIMER()
-	ON_WM_CLOSE()
+	ON_WM_SIZE()
 	ON_WM_PAINT()
 END_MESSAGE_MAP()
 std::unique_ptr<Panel> panel;
@@ -747,7 +812,37 @@ void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 }
 #endif
 void Stop() { panel.reset(); }
-void ShowPanel() { if(panel) { panel->RefreshIdentity(); panel->ShowWindow(SW_SHOW); panel->SetForegroundWindow(); } }
+bool AttachPanel(CWnd &host, const CRect &rect)
+{
+	if(!panel || !panel->GetSafeHwnd() || !host.GetSafeHwnd()) return false;
+	if(panel->GetParent() != &host)
+		panel->SetParent(&host);
+	panel->SetWindowPos(nullptr, rect.left, rect.top, std::max(1, rect.Width()), std::max(1, rect.Height()),
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	panel->LayoutChildren();
+	return true;
+}
+void LayoutPanel(CWnd &host, const CRect &rect)
+{
+	if(!panel || !panel->GetSafeHwnd()) return;
+	if(panel->GetParent() != &host) return;
+	panel->SetWindowPos(nullptr, rect.left, rect.top, std::max(1, rect.Width()), std::max(1, rect.Height()), SWP_NOZORDER | SWP_NOACTIVATE);
+	panel->LayoutChildren();
+}
+void DetachPanel(CWnd *host)
+{
+	if(!panel || !panel->GetSafeHwnd()) return;
+	if(host && panel->GetParent() != host) return;
+	if(host)
+	{
+		const HWND focus = ::GetFocus();
+		if(focus == panel->m_hWnd || ::IsChild(panel->m_hWnd, focus))
+			::SetFocus(host->GetSafeHwnd());
+	}
+	panel->SetWindowPos(nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
+	if(panel->parking && panel->parking->GetSafeHwnd() && panel->GetParent() != panel->parking)
+		panel->SetParent(panel->parking);
+}
 void DocumentClosed(CModDoc &doc)
 {
 	if(panel)
@@ -766,7 +861,7 @@ bool IsReadOnlyCommand(UINT command)
 {
 	switch(command)
 	{
-	case ShowPanelCommand: case ID_PLAYER_PLAY: case ID_PLAYER_STOP: case ID_PLAYER_PAUSE:
+	case ID_PLAYER_PLAY: case ID_PLAYER_STOP: case ID_PLAYER_PAUSE:
 	case ID_PATTERN_PLAY: case ID_PATTERN_PLAYNOLOOP: case ID_PATTERN_RESTART:
 	case ID_VIEW_PATTERNS: case ID_VIEW_SAMPLES: case ID_VIEW_INSTRUMENTS: case ID_VIEW_GLOBALS: case ID_VIEW_COMMENTS:
 	case ID_EDIT_COPY: case ID_FILE_CLOSE:

@@ -2229,7 +2229,6 @@ void CMainFrame::OnImportMidiLib()
 
 BOOL CMainFrame::OnCommand(WPARAM wParam, LPARAM lParam)
 {
-	if(LOWORD(wParam) == AI::ShowPanelCommand) { AI::ShowPanel(); return TRUE; }
 	if(AI::BlockCommand(LOWORD(wParam))) return TRUE;
 	return CMDIFrameWnd::OnCommand(wParam, lParam);
 }
@@ -3272,6 +3271,7 @@ void CMainFrame::OnHelp()
 				case CModControlView::Page::Samples: page = "::/Samples.html"; break;
 				case CModControlView::Page::Instruments: page = "::/Instruments.html"; break;
 				case CModControlView::Page::Comments: page = "::/Comments.html"; break;
+				case CModControlView::Page::AI: /* nothing */ break;
 				case CModControlView::Page::Unknown: /* nothing */ break;
 				case CModControlView::Page::NumPages: /* nothing */ break;
 			}
