@@ -141,6 +141,11 @@ protected:
 
 	// PROTOTYPE (Issue 22): Throwaway synchronized Piano Roll state.
 	// The Pattern data, cursor, selection and undo history remain owned by CViewPattern.
+	friend class CPianoRollPrototypePane;
+	int m_pianoRollPrototypeWidth = 0;
+	int m_pianoRollPrototypeFirstRow = 0;
+	int m_pianoRollPrototypeMinPitch = -1;
+	double m_pianoRollPrototypeZoom = 1.0;
 	bool m_pianoRollPrototypeDragging = false;
 	ROWINDEX m_pianoRollPrototypeDragRow = 0;
 	CHANNELINDEX m_pianoRollPrototypeDragChannel = 0;
@@ -276,6 +281,8 @@ public:
 	// synchronized editing seam before a production Piano Roll is designed.
 	CRect GetPianoRollPrototypeRect() const;
 	CRect GetPianoRollPrototypeGridRect() const;
+	CRect GetPianoRollPrototypeTimeRect() const;
+	int GetPianoRollPrototypeVisibleRows() const;
 	std::pair<int, int> GetPianoRollPrototypePitchRange() const;
 	void DrawPianoRollPrototype(CDC &dc);
 	bool HandlePianoRollPrototypeLButtonDown(UINT flags, CPoint point);

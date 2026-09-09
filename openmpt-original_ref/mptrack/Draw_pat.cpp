@@ -540,7 +540,7 @@ CRect CViewPattern::GetPianoRollPrototypeRect() const
 
 	// Keep the synchronized split legible on high-resolution displays. The
 	// previous 720-pixel cap reduced the roll to a narrow strip on a wide view.
-	const int width = std::min(std::max(420, client.Width() * 45 / 100), client.Width() - 360);
+	const int width = std::min(std::max(420, m_pianoRollPrototypeWidth > 0 ? m_pianoRollPrototypeWidth : client.Width() * 45 / 100), client.Width() - 360);
 	return CRect{std::max(client.left + 360, client.right - width), client.top, client.right, client.bottom};
 }
 
@@ -553,8 +553,31 @@ CRect CViewPattern::GetPianoRollPrototypeGridRect() const
 	grid.DeflateRect(14, 0);
 	grid.left += 76;
 	grid.top += 104;
-	grid.bottom -= 58;
+	grid.right -= 18;
+	grid.bottom -= 76;
 	return grid;
+}
+
+
+int CViewPattern::GetPianoRollPrototypeVisibleRows() const
+{
+	const CSoundFile *sndFile = GetSoundFile();
+	const int rows = sndFile && sndFile->Patterns.IsValidPat(m_nPattern) ? sndFile->Patterns[m_nPattern].GetNumRows() : 1;
+	return std::max(1, static_cast<int>(std::ceil(rows / m_pianoRollPrototypeZoom)));
+}
+
+
+CRect CViewPattern::GetPianoRollPrototypeTimeRect() const
+{
+	CRect time = GetPianoRollPrototypeGridRect();
+	const CSoundFile *sndFile = GetSoundFile();
+	const int rows = sndFile && sndFile->Patterns.IsValidPat(m_nPattern) ? sndFile->Patterns[m_nPattern].GetNumRows() : 1;
+	const int visible = GetPianoRollPrototypeVisibleRows();
+	const int first = Clamp(m_pianoRollPrototypeFirstRow, 0, std::max(0, rows - visible));
+	const int width = time.Width();
+	time.left -= static_cast<int>(static_cast<int64>(first) * width / visible);
+	time.right = time.left + static_cast<int>(static_cast<int64>(rows) * width / visible);
+	return time;
 }
 
 
@@ -569,7 +592,7 @@ std::pair<int, int> CViewPattern::GetPianoRollPrototypePitchRange() const
 	const int maxAllowed = specs.noteMax;
 	constexpr int visibleNotes = 36;
 	int center = NOTE_MIDDLEC;
-	if(sndFile->Patterns.IsValidPat(m_nPattern))
+	if(m_pianoRollPrototypeMinPitch < 0 && sndFile->Patterns.IsValidPat(m_nPattern))
 	{
 		// Keep the visible pitch range stable while the playback cursor moves.
 		// Re-centering on GetCursorCommand() made every note jump vertically as
@@ -595,7 +618,7 @@ std::pair<int, int> CViewPattern::GetPianoRollPrototypePitchRange() const
 			center = lowest + (highest - lowest) / 2;
 	}
 
-	int minPitch = center - visibleNotes / 2;
+	int minPitch = m_pianoRollPrototypeMinPitch >= 0 ? m_pianoRollPrototypeMinPitch : center - visibleNotes / 2;
 	Limit(minPitch, minAllowed, std::max(minAllowed, maxAllowed - visibleNotes + 1));
 	return {minPitch, std::min(maxAllowed, minPitch + visibleNotes - 1)};
 }
@@ -624,6 +647,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 {
 	const CRect pane = GetPianoRollPrototypeRect();
 	const CRect grid = GetPianoRollPrototypeGridRect();
+	const CRect time = GetPianoRollPrototypeTimeRect();
 	CModDoc *modDoc = GetDocument();
 	if(pane.IsRectEmpty() || grid.IsRectEmpty() || modDoc == nullptr)
 		return;
@@ -648,6 +672,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 
 	dc.FillSolidRect(pane, paneColor);
 	dc.Draw3dRect(pane, RGB(92, 101, 119), RGB(10, 12, 16));
+	dc.FillSolidRect(CRect{pane.left, pane.top, pane.left + 6, pane.bottom}, RGB(92, 101, 119));
 	const int oldBkMode = dc.SetBkMode(TRANSPARENT);
 	const COLORREF oldTextColor = dc.SetTextColor(textColor);
 	CFont *oldFont = dc.SelectObject(CFont::FromHandle(static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT))));
@@ -662,7 +687,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 	textRect.top += 22;
 	textRect.bottom += 18;
 	dc.SetTextColor(mutedText);
-	dc.DrawText(_T("Shared PatternRect selection  |  drag = transpose  |  double-click = preview"), textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+	dc.DrawText(_T("Ctrl+wheel: zoom | Shift+wheel: horizontal | wheel: pitch"), textRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
 	const int buttonTop = pane.top + 55;
 	const CRect downButton{pane.left + 14, buttonTop, pane.left + 66, buttonTop + 28};
@@ -681,6 +706,8 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 	drawButton(upButton, _T("+1"), GetCursorCommand().IsNote());
 	drawButton(undoButton, _T("Undo"), modDoc->GetPatternUndo().CanUndo());
 	drawButton(playButton, _T("Hear (F7)"), true);
+	drawButton(CRect{pane.left + 326, buttonTop, pane.left + 360, buttonTop + 28}, _T("X-"), m_pianoRollPrototypeZoom > 1.0);
+	drawButton(CRect{pane.left + 366, buttonTop, pane.left + 400, buttonTop + 28}, _T("X+"), GetPianoRollPrototypeVisibleRows() > 1);
 
 	const CRect keyboard{pane.left + 14, grid.top, grid.left - 6, grid.bottom};
 	const CRect timeRuler{grid.left, grid.top - 20, grid.right, grid.top};
@@ -723,7 +750,9 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 	{
 		if(row != numRows && row % 4 != 0)
 			continue;
-		const int x = grid.left + static_cast<int>((static_cast<int64>(row) * grid.Width()) / std::max<ROWINDEX>(1, numRows));
+		const int x = time.left + static_cast<int>((static_cast<int64>(row) * time.Width()) / std::max<ROWINDEX>(1, numRows));
+		if(x < grid.left || x >= grid.right)
+			continue;
 		CPen pen(PS_SOLID, 1, row % 16 == 0 ? strongGrid : weakGrid);
 		CPen *oldPen = dc.SelectObject(&pen);
 		dc.MoveTo(x, grid.top);
@@ -754,6 +783,8 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 		RGB(80, 166, 255), RGB(255, 112, 132), RGB(102, 211, 164), RGB(202, 143, 255),
 		RGB(255, 178, 79), RGB(95, 205, 224), RGB(232, 112, 218), RGB(177, 205, 91),
 	};
+	const int gridDC = dc.SaveDC();
+	dc.IntersectClipRect(grid);
 	int detailMarkers = 0;
 	for(CHANNELINDEX channel = 0; channel < sndFile.GetNumChannels(); channel++)
 	{
@@ -764,7 +795,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 			if(hasTrackerDetail)
 			{
 				detailMarkers++;
-				const int x = grid.left + static_cast<int>((static_cast<int64>(row) * grid.Width()) / std::max<ROWINDEX>(1, numRows));
+				const int x = time.left + static_cast<int>((static_cast<int64>(row) * time.Width()) / std::max<ROWINDEX>(1, numRows));
 				const int y = grid.bottom - 8 - static_cast<int>(channel % 3) * 5;
 				POINT diamond[] = {{x, y - 4}, {x + 4, y}, {x, y + 4}, {x - 4, y}};
 				CBrush brush(warningColor);
@@ -775,7 +806,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 
 			if(command.IsSpecialNote() && !command.IsPcNote())
 			{
-				const int x = grid.left + static_cast<int>((static_cast<int64>(row) * grid.Width()) / std::max<ROWINDEX>(1, numRows));
+				const int x = time.left + static_cast<int>((static_cast<int64>(row) * time.Width()) / std::max<ROWINDEX>(1, numRows));
 				CPen markerPen(PS_SOLID, 2, RGB(240, 111, 196));
 				CPen *oldPen = dc.SelectObject(&markerPen);
 				dc.MoveTo(x, grid.top);
@@ -799,7 +830,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 				}
 			}
 
-			const CRect noteRect = PianoRollPrototypeNoteRect(grid, row, endRow, command.note, minPitch, maxPitch, numRows, channel);
+			const CRect noteRect = PianoRollPrototypeNoteRect(time, row, endRow, command.note, minPitch, maxPitch, numRows, channel);
 			COLORREF noteColor = channelColors[channel % std::size(channelColors)];
 			if(sndFile.ChnSettings[channel].color != ModChannelSettings::INVALID_COLOR)
 				noteColor = sndFile.ChnSettings[channel].color;
@@ -834,7 +865,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 
 			if(m_pianoRollPrototypeDragging && row == m_pianoRollPrototypeDragRow && channel == m_pianoRollPrototypeDragChannel)
 			{
-				const CRect previewRect = PianoRollPrototypeNoteRect(grid, row, endRow, m_pianoRollPrototypePreviewNote, minPitch, maxPitch, numRows, channel);
+				const CRect previewRect = PianoRollPrototypeNoteRect(time, row, endRow, m_pianoRollPrototypePreviewNote, minPitch, maxPitch, numRows, channel);
 				CBrush previewBrush(selectionColor);
 				dc.FrameRect(previewRect, &previewBrush);
 			}
@@ -843,7 +874,7 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 
 	if(m_nPlayPat == m_nPattern && m_nPlayRow < numRows)
 	{
-		const int x = grid.left + static_cast<int>((static_cast<int64>(m_nPlayRow) * grid.Width()) / std::max<ROWINDEX>(1, numRows));
+		const int x = time.left + static_cast<int>((static_cast<int64>(m_nPlayRow) * time.Width()) / std::max<ROWINDEX>(1, numRows));
 		CPen playPen(PS_SOLID, 2, RGB(86, 255, 157));
 		CPen *oldPen = dc.SelectObject(&playPen);
 		dc.MoveTo(x, grid.top);
@@ -851,13 +882,14 @@ void CViewPattern::DrawPianoRollPrototype(CDC &dc)
 		dc.SelectObject(oldPen);
 	}
 
-	CRect legendRect{grid.left, grid.bottom + 6, grid.right, grid.bottom + 24};
+	dc.RestoreDC(gridDC);
+	CRect legendRect{grid.left, grid.bottom + 24, grid.right, grid.bottom + 42};
 	dc.SetTextColor(warningColor);
 	CString legend;
 	legend.Format(_T("<> %d Tracker-detail marker%s (preserved; edit in Tracker) | explicit off/cut/fade"), detailMarkers, detailMarkers == 1 ? _T("") : _T("s"));
 	dc.DrawText(legend, legendRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-	CRect stateRect{grid.left, grid.bottom + 27, grid.right, pane.bottom - 5};
+	CRect stateRect{grid.left, grid.bottom + 45, grid.right, pane.bottom - 5};
 	dc.SetTextColor(mutedText);
 	CString state;
 	state.Format(_T("Rows %u-%u | Ch %u-%u | cursor %u/%u | %s"),
@@ -920,6 +952,7 @@ bool CViewPattern::HandlePianoRollPrototypeLButtonDown(UINT, CPoint point)
 {
 	const CRect pane = GetPianoRollPrototypeRect();
 	const CRect grid = GetPianoRollPrototypeGridRect();
+	const CRect time = GetPianoRollPrototypeTimeRect();
 	if(!pane.PtInRect(point))
 		return false;
 	SetFocus();
@@ -978,7 +1011,7 @@ bool CViewPattern::HandlePianoRollPrototypeLButtonDown(UINT, CPoint point)
 					break;
 				}
 			}
-			const CRect noteRect = PianoRollPrototypeNoteRect(grid, row, endRow, command.note, minPitch, maxPitch, numRows, channel);
+			const CRect noteRect = PianoRollPrototypeNoteRect(time, row, endRow, command.note, minPitch, maxPitch, numRows, channel);
 			if(noteRect.PtInRect(point))
 			{
 				const PatternCursor cursor(row, channel, PatternCursor::noteColumn);
@@ -997,7 +1030,7 @@ bool CViewPattern::HandlePianoRollPrototypeLButtonDown(UINT, CPoint point)
 		}
 	}
 
-	const ROWINDEX row = std::min(numRows - 1, static_cast<ROWINDEX>((static_cast<int64>(point.x - grid.left) * numRows) / std::max(1, grid.Width())));
+	const ROWINDEX row = std::min(numRows - 1, static_cast<ROWINDEX>((static_cast<int64>(point.x - time.left) * numRows) / std::max(1, time.Width())));
 	const CHANNELINDEX channel = std::min(GetCurrentChannel(), static_cast<CHANNELINDEX>(sndFile->GetNumChannels() - 1));
 	const PatternCursor cursor(row, channel, PatternCursor::noteColumn);
 	SetCursorPosition(cursor);
