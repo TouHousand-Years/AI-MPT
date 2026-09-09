@@ -181,6 +181,14 @@ unchanged in `structuredContent`. App errors such as `documentGone`,
 not interpreted or retargeted. Transport disconnect becomes `instanceGone`;
 malformed framing/results become `schemaFailure` and close the connection.
 
+The app pipe accepts multiple simultaneous local connections. Their envelopes
+are queued and dispatched deterministically on the UI thread, so attached
+clients can perform one-shot read-only calls without competing for the pipe.
+An `occupy=true` read claims the single retained session for that connection;
+until it releases or hands off the session, calls from other connections receive
+`busy`. Attaching or disconnecting a read-only client never steals or releases
+another connection's retained state.
+
 One extension exists for diagnostics: a call envelope with `"direct":true` is
 never queued. The broker attempts the model read on its own thread and the
 owning-thread guard rejects it with `owningThreadRequired`, making the

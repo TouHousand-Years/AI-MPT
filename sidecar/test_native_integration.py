@@ -12,7 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import probe
 
 ROOT = Path(__file__).resolve().parent.parent
-EXE = ROOT / "openmpt-original_ref/bin/debug/vs2022-win10-static/amd64/OpenMPT.exe"
+EXE = Path(os.environ.get(
+    "OPENMPT_TEST_EXE",
+    ROOT / "openmpt-original_ref/bin/debug/vs2022-win10-static/amd64/OpenMPT.exe",
+))
 
 
 @unittest.skipUnless(os.environ.get("OPENMPT_RUN_NATIVE_INTEGRATION") == "1", "Opt-in native executable integration")
@@ -96,6 +99,46 @@ class NativeIntegrationTests(unittest.TestCase):
                 result = second[0]["structuredContent"]
                 self.assertTrue(result["ok"], result)
             finally:
+                self.stop_app(app, stop)
+
+    def test_concurrent_read_only_connections_and_retained_owner(self):
+        """Readers coexist; retained state belongs to one exact connection."""
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-") as directory:
+            report = Path(directory) / "endpoint.json"
+            stop = Path(directory) / "stop"
+            app, _, endpoint = self.start_app(report, stop, 0)
+            clients = [probe.PipeClient(endpoint["pipe"]) for _ in range(2)]
+            try:
+                for client in clients:
+                    self.assertIsNone(client.connect(), "concurrent pipe open failed")
+                    attached = client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))
+                    self.assertTrue(attached.get("ok"), attached)
+
+                for client in clients:
+                    result = client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "call",
+                                                            tool="get_pattern_context", arguments={}))
+                    self.assertTrue(result.get("ok"), result)
+
+                retained = clients[0].transact(probe.envelope(endpoint["instance"], endpoint["document"], "call",
+                                                               tool="get_pattern_context", arguments={"occupy": True}))
+                self.assertTrue(retained.get("ok"), retained)
+                blocked = clients[1].transact(probe.envelope(endpoint["instance"], endpoint["document"], "call",
+                                                              tool="get_pattern_context", arguments={}))
+                self.assertEqual(blocked["error"]["code"], "busy")
+                stolen = clients[1].transact(probe.envelope(endpoint["instance"], endpoint["document"], "call",
+                                                             tool="get_pattern_context",
+                                                             arguments={"session": retained["session"]}))
+                self.assertEqual(stolen["error"]["code"], "busy")
+
+                # Closing an unrelated reader cannot release the retained owner.
+                clients[1].close()
+                owner_read = clients[0].transact(probe.envelope(endpoint["instance"], endpoint["document"], "call",
+                                                                 tool="get_pattern_context",
+                                                                 arguments={"session": retained["session"], "baseline": True}))
+                self.assertTrue(owner_read.get("ok"), owner_read)
+            finally:
+                for client in clients:
+                    client.close()
                 self.stop_app(app, stop)
 
     def test_both_directions_through_real_sidecar_and_app(self):

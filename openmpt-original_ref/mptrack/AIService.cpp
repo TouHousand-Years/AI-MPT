@@ -105,6 +105,8 @@ class Broker
 {
 	HANDLE m_stop = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 	std::thread m_worker;
+	std::mutex m_clientsMutex;
+	std::vector<std::thread> m_clients;
 	std::mutex m_mutex;
 	std::deque<std::shared_ptr<Request>> m_queue;
 	std::mutex m_disconnectMutex;
@@ -113,6 +115,20 @@ class Broker
 	std::wstring m_name;
 	std::function<Json()> m_directCall;
 	std::atomic<bool> m_running = false;
+	void ReapClients(bool all = false)
+	{
+		std::lock_guard lock(m_clientsMutex);
+		for(auto client = m_clients.begin(); client != m_clients.end();)
+		{
+			if(!all && WaitForSingleObject(client->native_handle(), 0) != WAIT_OBJECT_0)
+			{
+				++client;
+				continue;
+			}
+			if(client->joinable()) client->join();
+			client = m_clients.erase(client);
+		}
+	}
 	bool IO(HANDLE pipe, void *buffer, DWORD size, bool write)
 	{
 		IpcThreadScope ipc;
@@ -142,6 +158,88 @@ class Broker
 		}
 		return true;
 	}
+	bool Connect(HANDLE pipe)
+	{
+		OVERLAPPED connect{};
+		connect.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+		BOOL connected = ConnectNamedPipe(pipe, &connect);
+		DWORD error = connected ? ERROR_SUCCESS : GetLastError();
+		{
+			IpcThreadScope ipc;
+			if(error == ERROR_IO_PENDING)
+			{
+				HANDLE waits[]{m_stop, connect.hEvent};
+				if(WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
+				{
+					DWORD unused = 0;
+					connected = GetOverlappedResult(pipe, &connect, &unused, FALSE);
+				} else
+				{
+					CancelIoEx(pipe, &connect);
+					DWORD unused = 0;
+					GetOverlappedResult(pipe, &connect, &unused, TRUE);
+				}
+			} else connected = connected || error == ERROR_PIPE_CONNECTED;
+		}
+		CloseHandle(connect.hEvent);
+		return connected != FALSE;
+	}
+	void Serve(HANDLE pipe, uint64 connection)
+	{
+		std::string attachedInstance, attachedDocument;
+		while(WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
+		{
+			DWORD length = 0;
+			if(!IO(pipe, &length, 4, false) || length == 0 || length > MaxFrame) break;
+			std::string bytes(length, '\0');
+			if(!IO(pipe, bytes.data(), length, false)) break;
+			Json result;
+			try
+			{
+				auto envelope = Json::parse(bytes);
+				if(!envelope.is_object() || envelope.value("version", 0) != 1 || !envelope.at("operation").is_string()
+					|| !envelope.at("instance").is_string() || !envelope.at("document").is_string()) throw std::invalid_argument("Envelope");
+				const bool attach = envelope["operation"] == "attach";
+				if(!attach && (attachedInstance.empty() || envelope["instance"] != attachedInstance || envelope["document"] != attachedDocument))
+					result = Failure("notAttached", "Explicit attachment required", "attachment");
+				else if(!attach && envelope.value("direct", false))
+					result = m_directCall();
+				else
+				{
+					auto request = std::make_shared<Request>();
+					request->envelope = envelope;
+					request->connection = connection;
+					{ std::lock_guard lock(m_mutex); m_queue.push_back(request); }
+					std::unique_lock lock(request->mutex);
+					IpcThreadScope ipc;
+					while(!request->done && WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
+						request->ready.wait_for(lock, std::chrono::milliseconds(100));
+					if(!request->done) break;
+					result = request->response;
+					if(attach && result.value("ok", false))
+					{
+						attachedInstance = envelope["instance"].get<std::string>();
+						attachedDocument = envelope["document"].get<std::string>();
+					}
+				}
+			} catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid app envelope", "transport"); }
+			catch(const std::invalid_argument &) { result = Failure("schemaFailure", "Invalid app envelope", "transport"); }
+			catch(const std::exception &) { result = Failure("internalError", "App service failed", "transport"); }
+			bytes = result.dump();
+			if(bytes.size() > MaxFrame) bytes = Failure("schemaFailure", "Response exceeds frame limit", "transport").dump();
+			length = static_cast<DWORD>(bytes.size());
+			if(!IO(pipe, &length, 4, true) || !IO(pipe, bytes.data(), length, true)) break;
+		}
+		// Only the owning/UI thread may decide whether this connection owns
+		// retained capability state. Other connected readers are unaffected.
+		if(!attachedInstance.empty())
+		{
+			std::lock_guard lock(m_disconnectMutex);
+			m_disconnects.push_back({connection});
+		}
+		DisconnectNamedPipe(pipe);
+		CloseHandle(pipe);
+	}
 	void Run()
 	{
 		HANDLE token = nullptr;
@@ -170,99 +268,36 @@ class Broker
 			return;
 		}
 		SECURITY_ATTRIBUTES security{sizeof(security), descriptor, FALSE};
-		HANDLE pipe = CreateNamedPipeW(m_name.c_str(), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | FILE_FLAG_FIRST_PIPE_INSTANCE,
-			PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 65536, 65536, 0, &security);
-		LocalFree(descriptor);
-		if(pipe == INVALID_HANDLE_VALUE)
-		{
-			TestTrace("broker: CreateNamedPipe failed err=" + std::to_string(GetLastError()));
-			return;
-		}
-		TestTrace("broker: pipe created");
-		m_running = true;
+		bool first = true;
 		while(WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
 		{
+			const DWORD access = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
+			HANDLE pipe = CreateNamedPipeW(m_name.c_str(), access,
+				PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+				PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0, &security);
+			if(pipe == INVALID_HANDLE_VALUE)
+			{
+				TestTrace("broker: CreateNamedPipe failed err=" + std::to_string(GetLastError()));
+				break;
+			}
+			if(first)
+			{
+				first = false;
+				m_running = true;
+				TestTrace("broker: multi-instance pipe created");
+			}
 			const uint64 connection = ++m_nextConnection;
-			OVERLAPPED connect{};
-			connect.hEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
-			BOOL connected = ConnectNamedPipe(pipe, &connect);
-			DWORD error = connected ? ERROR_SUCCESS : GetLastError();
+			if(!Connect(pipe))
 			{
-				IpcThreadScope ipc;
-				if(error == ERROR_IO_PENDING)
-				{
-					HANDLE waits[]{m_stop, connect.hEvent};
-					if(WaitForMultipleObjects(2, waits, FALSE, INFINITE) == WAIT_OBJECT_0 + 1)
-					{
-						DWORD unused = 0;
-						connected = GetOverlappedResult(pipe, &connect, &unused, FALSE);
-					} else
-					{
-						CancelIoEx(pipe, &connect);
-						DWORD unused = 0;
-						GetOverlappedResult(pipe, &connect, &unused, TRUE);
-					}
-				} else connected = connected || error == ERROR_PIPE_CONNECTED;
+				CloseHandle(pipe);
+				break;
 			}
-			CloseHandle(connect.hEvent);
-			if(!connected) break;
-			std::string attachedInstance, attachedDocument;
-			while(WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
-			{
-				DWORD length = 0;
-				if(!IO(pipe, &length, 4, false) || length == 0 || length > MaxFrame) break;
-				std::string bytes(length, '\0');
-				if(!IO(pipe, bytes.data(), length, false)) break;
-				Json result;
-				try
-				{
-					auto envelope = Json::parse(bytes);
-					if(!envelope.is_object() || envelope.value("version", 0) != 1 || !envelope.at("operation").is_string()
-						|| !envelope.at("instance").is_string() || !envelope.at("document").is_string()) throw std::invalid_argument("Envelope");
-					const bool attach = envelope["operation"] == "attach";
-					if(!attach && (attachedInstance.empty() || envelope["instance"] != attachedInstance || envelope["document"] != attachedDocument))
-						result = Failure("notAttached", "Explicit attachment required", "attachment");
-					else if(!attach && envelope.value("direct", false))
-						result = m_directCall();
-					else
-					{
-						auto request = std::make_shared<Request>();
-						request->envelope = envelope;
-						request->connection = connection;
-						{ std::lock_guard lock(m_mutex); m_queue.push_back(request); }
-						std::unique_lock lock(request->mutex);
-						IpcThreadScope ipc;
-						while(!request->done && WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
-							request->ready.wait_for(lock, std::chrono::milliseconds(100));
-						if(!request->done) break;
-						result = request->response;
-						if(attach && result.value("ok", false))
-						{
-							attachedInstance = envelope["instance"].get<std::string>();
-							attachedDocument = envelope["document"].get<std::string>();
-						}
-					}
-				} catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid app envelope", "transport"); }
-				catch(const std::invalid_argument &) { result = Failure("schemaFailure", "Invalid app envelope", "transport"); }
-				catch(const std::exception &) { result = Failure("internalError", "App service failed", "transport"); }
-				bytes = result.dump();
-				if(bytes.size() > MaxFrame) bytes = Failure("schemaFailure", "Response exceeds frame limit", "transport").dump();
-				length = static_cast<DWORD>(bytes.size());
-				if(!IO(pipe, &length, 4, true) || !IO(pipe, bytes.data(), length, true)) break;
-			}
-			// Ticket 31 AC4: an attached client vanishing must leave no residue.
-			// The owning thread drains this notice and releases exactly the state
-			// bound to this connection; a later reattach on a new connection is
-			// never touched by this stale identity.
-			if(!attachedInstance.empty())
-			{
-				std::lock_guard lock(m_disconnectMutex);
-				m_disconnects.push_back({connection});
-			}
-			DisconnectNamedPipe(pipe);
+			ReapClients();
+			std::lock_guard lock(m_clientsMutex);
+			m_clients.emplace_back([this, pipe, connection] { Serve(pipe, connection); });
 		}
 		m_running = false;
-		CloseHandle(pipe);
+		LocalFree(descriptor);
 	}
 public:
 	Broker(std::wstring name, std::function<Json()> directCall)
@@ -270,7 +305,13 @@ public:
 	{
 		m_worker = std::thread([this] { try { Run(); } catch(...) { m_running = false; } });
 	}
-	~Broker() { SetEvent(m_stop); if(m_worker.joinable()) m_worker.join(); CloseHandle(m_stop); }
+	~Broker()
+	{
+		SetEvent(m_stop);
+		if(m_worker.joinable()) m_worker.join();
+		ReapClients(true);
+		CloseHandle(m_stop);
+	}
 	bool Running() const { return m_running; }
 	std::shared_ptr<Request> Pop()
 	{
@@ -316,8 +357,9 @@ public:
 	CListBox evidence;
 	std::vector<std::unique_ptr<CButton>> buttons;
 	std::string instance;
-	// Broker connection id whose attachment owns the current session state.
-	uint64 attachedConnection = 0;
+	// The connection that owns retained (potentially mutating) capability state.
+	// Plain attachments and one-shot reads never claim this slot.
+	uint64 capabilityConnection = 0;
 	std::wstring pipe;
 	Json review;
 	CString identityText;
@@ -487,6 +529,7 @@ public:
 	void ReleaseNow()
 	{
 		if(capability) capability->ForceRelease();
+		capabilityConnection = 0;
 		if(pending) { pending->Complete(Failure("occupancyLost", "Human released the session")); pending.reset(); }
 	}
 	void PublishActiveDocument()
@@ -554,25 +597,27 @@ public:
 	}
 	void HandleDisconnect(const DisconnectNotice &notice)
 	{
-		// Ticket 31 AC4: process loss leaves no app residue. Release only the
-		// state bound to this exact attachment; connection ids are monotonic and
-		// unique within the broker, so the id alone identifies the attachment,
-		// and a newer client already attached on another connection is never
-		// touched by this stale notice.
-		if(notice.connection != attachedConnection) return;
-		attachedConnection = 0;
-		// Unhanded retained work and pending requests die with their connection.
-		if(pending) { pending->Complete(Failure("occupancyLost", "Client disconnected")); pending.reset(); }
+		{
+			std::lock_guard lock(threadProbe.mutex);
+			if(threadProbe.connection == notice.connection)
+			{
+				threadProbe.capability.reset();
+				threadProbe.document = nullptr;
+				threadProbe.connection = 0;
+			}
+		}
+		// Ticket 31 AC4: process loss releases only state retained by this exact
+		// connection. Disconnects from concurrent read-only clients are inert.
+		if(notice.connection != capabilityConnection) return;
+		capabilityConnection = 0;
+		if(pending && pending->connection == notice.connection)
+		{
+			pending->Complete(Failure("occupancyLost", "Client disconnected"));
+			pending.reset();
+		}
 		// A proposal frozen by handoff_for_review belongs to human review and
 		// must survive the client; only a proposal-free capability is released.
 		if(capability && !capability->HasProposal()) { capability.reset(); document = nullptr; RefreshReview(); }
-		std::lock_guard lock(threadProbe.mutex);
-		if(threadProbe.connection == notice.connection)
-		{
-			threadProbe.capability.reset();
-			threadProbe.document = nullptr;
-			threadProbe.connection = 0;
-		}
 	}
 	Json Dispatch(const Json &envelope, uint64 connection)
 	{
@@ -587,7 +632,6 @@ public:
 			threadProbe.capability = std::make_unique<PatternCapability>(*target, PATTERNINDEX_INVALID, std::nullopt);
 			threadProbe.document = target;
 			threadProbe.connection = connection;
-			attachedConnection = connection;
 			return {{"ok", true}};
 		}
 		if(envelope.at("operation") != "call") return Failure("schemaFailure", "Unknown operation", "transport");
@@ -595,6 +639,8 @@ public:
 		const auto &args = envelope.at("arguments");
 		if(!args.is_object()) return Failure("schemaFailure", "Arguments must be an object", "transport");
 		if(capability && (capability->Occupied() || capability->HasProposal()) && document != target) return Failure("busy", "Another document has active work");
+		if(capability && capability->Occupied() && capabilityConnection != connection)
+			return Failure("busy", "Another MCP connection owns the active session");
 		if(tool == "get_pattern_context" && !args.contains("session") && (!capability || (!capability->Occupied() && !capability->HasProposal())))
 		{
 			auto *view = PatternView(*target);
@@ -604,7 +650,10 @@ public:
 		}
 		if(!capability || document != target) return Failure("occupancyLost", "Start with an occupied context read");
 		capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
-		return capability->Call(tool, args);
+		auto result = capability->Call(tool, args);
+		if(capability->Occupied() && result.value("ok", false) && result.contains("session")) capabilityConnection = connection;
+		else if(!capability->Occupied()) capabilityConnection = 0;
+		return result;
 	}
 	std::optional<ModCommand> CurrentCell(const Json &cell) const
 	{
@@ -744,7 +793,10 @@ public:
 			if(broker)
 				while(auto notice = broker->PopDisconnect())
 					HandleDisconnect(*notice);
-			if(broker && !pending)
+			// Keep draining other connections while one request waits for human
+			// approval. Dispatch rejects their capability calls as busy, but attach
+			// and the reply itself no longer queue behind an unrelated writer.
+			if(broker)
 				if(auto request = broker->Pop())
 				{
 					Json result;
