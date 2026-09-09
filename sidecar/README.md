@@ -9,7 +9,10 @@ app side it speaks to is implemented: the running OpenMPT application exposes a
 current-user named pipe (`AIService.cpp`), the broker validates and queues
 envelopes off the owning thread, and the document owning thread alone rechecks
 document liveness and executes capability calls through the issue-29 facade.
-There is no discovery and no foreground-document fallback anywhere.
+There is no foreground-document fallback. For normal Codex use, the owner can
+explicitly publish the active document from OpenMPT's AI / MCP panel; the
+long-running Sidecar reads that current-user target file and attaches to the
+exact published lifetime identities.
 
 ## Run and test
 
@@ -22,8 +25,9 @@ python sidecar/openmpt_mcp.py --help
 
 The process tests launch the Sidecar over stdin/stdout and use an independent
 scripted Windows named-pipe peer. They cover all five translations, explicit
-attachment, error-layer preservation, fragmented replies, rejected attachment,
-disconnect without mutation replay, and rejection of remote pipe names.
+and published-target attachment, guarded target switching, error-layer
+preservation, fragmented replies, rejected attachment, disconnect without
+mutation replay, and rejection of remote pipe names.
 `test_probe.py` covers the probe client against the same scripted peer. They
 do not load or modify a music document.
 
@@ -86,14 +90,64 @@ printing the typed result and a PASS/FAIL line for each. Individual steps are
 available as `attach`, `context`, and `case <name>`; each case exits non-zero
 when its expected typed failure is not observed.
 
-## MCP client configuration
+## Recommended Codex setup: configure once, select documents in OpenMPT
+
+Add one stable STDIO server to the user-level `~/.codex/config.toml`, or to a
+trusted project's `.codex/config.toml`. Use forward slashes in the Windows path:
+
+```toml
+[mcp_servers.openmpt]
+command = "python"
+args = ["C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py", "--auto-target"]
+required = false
+startup_timeout_sec = 10
+tool_timeout_sec = 300
+```
+
+The equivalent one-time CLI command is:
+
+```powershell
+codex mcp add openmpt -- python C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py --auto-target
+```
+
+Restart Codex once after adding this entry. After that, changing OpenMPT
+documents does not require editing or restarting Codex:
+
+1. Open the document and its Patterns tab in OpenMPT.
+2. Open the **AI / MCP** panel.
+3. Click **Connect active doc to Codex**.
+4. Use the five Pattern tools from the existing Codex task.
+
+The button atomically publishes the exact pipe, application-lifetime ID,
+document-lifetime ID, and a fresh publication generation to
+`%LOCALAPPDATA%\OpenMPT\AI\codex-target.json`. `--auto-target` reads that
+standard current-user path. `--target-file <path>` is available for a custom
+stable location.
+
+Publishing is rejected while OpenMPT has retained occupancy or a proposal
+awaiting review. As a second guard, the Sidecar will not switch a connection
+when it knows retained work is active; only `handoff_for_review`,
+`abort_session`, or `release_occupancy` continues against the old explicit
+identity. The newly published target is picked up by the next call after the
+old work ends. Re-publishing the same document creates a new generation, which
+is an explicit request to clear a latched attachment error and reconnect.
+
+The target file is not automatic foreground tracking: opening or focusing a
+different document never changes it. Multiple OpenMPT instances share the
+same current-user publication location, so the most recently clicked button
+selects the target.
+
+## Explicit MCP client configuration for diagnostics
 
 Configure the MCP client to launch `python` with `sidecar/openmpt_mcp.py`,
 `--pipe`, `--instance`, and `--document`. Use an absolute script path and the
 exact three values from the application. Launching without all three values is
-allowed for listing tools, but calls return `notAttached`. A rejected
-attachment or lost connection requires relaunching with explicit identities;
-the process never retries a possibly applied call.
+allowed for listing tools, but calls return `notAttached`. This legacy mode is
+useful for the probe, Inspector, and integration tests. It cannot be combined
+with `--auto-target` or `--target-file`. A rejected attachment or lost
+connection remains latched, and the process never retries a possibly applied
+call; in published-target mode, click the OpenMPT connection button again to
+explicitly create a new generation before reconnecting.
 
 The supported MCP revision is 2025-11-25. It uses newline-delimited UTF-8
 JSON-RPC and returns both structured tool results and a text representation,

@@ -1,12 +1,16 @@
 """Local stdio MCP translator. Application state stays behind the named pipe."""
 import argparse
 import json
+import os
+from pathlib import Path
 import struct
 import sys
 
 PROTOCOL = "2025-11-25"
 MAX_MESSAGE = 4 * 1024 * 1024
+MAX_TARGET_FILE = 64 * 1024
 ENDING = "Finish retained work with handoff_for_review or abort_session; use release_occupancy only for read-only work."
+ENDING_TOOLS = {"handoff_for_review", "abort_session", "release_occupancy"}
 
 
 def object_schema(properties, required=()):
@@ -68,20 +72,76 @@ class RpcError(Exception):
         self.code = code
 
 
+def automatic_target_file():
+    root = os.environ.get("LOCALAPPDATA")
+    return Path(root) / "OpenMPT" / "AI" / "codex-target.json" if root else None
+
+
 class Sidecar:
-    def __init__(self, pipe=None, instance=None, document=None):
+    def __init__(self, pipe=None, instance=None, document=None, target_file=None):
         self.pipe_name, self.instance, self.document = pipe, instance, document
+        self.target_file = Path(target_file) if target_file else None
+        self.target_identity = None
+        self.retained_session = False
         self.pipe = None
         self.attachment_error = None
 
     def close(self):
         if self.pipe is not None:
-            self.pipe.close()
-            self.pipe = None
+            pipe, self.pipe = self.pipe, None
+            try:
+                pipe.close()
+            except OSError:
+                pass
 
     def envelope(self, operation, **fields):
         return {"version": 1, "operation": operation, "instance": self.instance,
                 "document": self.document, **fields}
+
+    def refresh_target(self, tool):
+        if self.target_file is None:
+            return None
+        try:
+            with self.target_file.open("rb") as source:
+                payload = source.read(MAX_TARGET_FILE + 1)
+            if not payload or len(payload) > MAX_TARGET_FILE:
+                raise ValueError("Invalid target file size")
+            target = decode_json(payload.decode("utf-8"))
+            if not isinstance(target, dict) or type(target.get("version")) is not int or target["version"] != 1:
+                raise ValueError("Invalid target file version")
+            values = tuple(target.get(name) for name in ("pipe", "instance", "document", "generation"))
+            if any(not isinstance(value, str) or not value for value in values):
+                raise ValueError("Incomplete target identity")
+        except FileNotFoundError:
+            return failure("notAttached", "In OpenMPT, open the AI / MCP panel and click Connect active document to Codex.", "attachment")
+        except OSError as error:
+            return failure("notAttached", f"Cannot read the OpenMPT target file: {error}", "attachment")
+        except (ValueError, UnicodeError, RecursionError):
+            return failure("schemaFailure", "The OpenMPT target file is invalid; publish the document again.", "attachment")
+
+        if values == self.target_identity:
+            return None
+        if self.target_identity is not None and self.retained_session:
+            if tool in ENDING_TOOLS:
+                # The new publication becomes active after retained work against
+                # the old explicit identity has been safely ended.
+                return None
+            return failure("busy", "Another OpenMPT document was published while retained work is active. Finish it with handoff_for_review or abort_session first.", "attachment")
+
+        self.close()
+        self.pipe_name, self.instance, self.document, _ = values
+        self.target_identity = values
+        self.attachment_error = None
+        return None
+
+    def update_session_state(self, name, result):
+        if result.get("ok", False):
+            if name == "get_pattern_context" and isinstance(result.get("session"), str) and result["session"]:
+                self.retained_session = True
+            elif name in ENDING_TOOLS:
+                self.retained_session = False
+        elif result.get("error", {}).get("code") in {"occupancyLost", "documentGone", "instanceGone"}:
+            self.retained_session = False
 
     def transact(self, envelope):
         payload = encode_json(envelope)
@@ -116,8 +176,11 @@ class Sidecar:
         return result
 
     def call(self, name, arguments):
+        target_error = self.refresh_target(name)
+        if target_error:
+            return target_error
         if not all((self.pipe_name, self.instance, self.document)):
-            return failure("notAttached", "Launch with an explicit --pipe, --instance and --document", "attachment")
+            return failure("notAttached", "Launch with explicit identities or use --auto-target and publish a document from OpenMPT.", "attachment")
         if self.attachment_error:
             return self.attachment_error
         try:
@@ -130,9 +193,12 @@ class Sidecar:
                     self.attachment_error = attached
                     self.close()
                     return attached
-            return self.transact(self.envelope("call", tool=name, arguments=arguments))
+            result = self.transact(self.envelope("call", tool=name, arguments=arguments))
+            self.update_session_state(name, result)
+            return result
         except (OSError, EOFError):
             self.attachment_error = failure("instanceGone", "Application connection lost; do not replay mutations. Relaunch and explicitly attach again.")
+            self.retained_session = False
         except (ValueError, UnicodeError, RecursionError):
             self.attachment_error = failure("schemaFailure", "Invalid application response; connection closed")
         self.close()
@@ -142,7 +208,7 @@ class Sidecar:
         method = request["method"]
         if method == "initialize":
             return {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "openmpt-pattern", "version": "0.1.0"}}
+                    "serverInfo": {"name": "openmpt-pattern", "version": "0.2.0"}}
         if method == "ping":
             return {}
         if method == "tools/list":
@@ -193,8 +259,19 @@ if __name__ == "__main__":
     parser.add_argument("--pipe", help="Exact current-user local pipe printed by the app")
     parser.add_argument("--instance", help="Exact app lifetime ID printed by the app")
     parser.add_argument("--document", help="Exact document lifetime ID printed by the app")
+    targets = parser.add_mutually_exclusive_group()
+    targets.add_argument("--target-file", type=Path, help="Target JSON atomically published by OpenMPT")
+    targets.add_argument("--auto-target", action="store_true", help="Use the current user's standard OpenMPT target file")
     options = parser.parse_args()
-    sidecar = Sidecar(options.pipe, options.instance, options.document)
+    explicit = (options.pipe, options.instance, options.document)
+    if any(explicit) and not all(explicit):
+        parser.error("--pipe, --instance and --document must be provided together")
+    if any(explicit) and (options.target_file or options.auto_target):
+        parser.error("explicit identities cannot be combined with a target file")
+    target_file = automatic_target_file() if options.auto_target else options.target_file
+    if options.auto_target and target_file is None:
+        parser.error("--auto-target requires LOCALAPPDATA")
+    sidecar = Sidecar(options.pipe, options.instance, options.document, target_file)
     try:
         serve(sidecar)
     finally:

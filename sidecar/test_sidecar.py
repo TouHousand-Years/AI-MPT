@@ -8,8 +8,11 @@ import ctypes
 from ctypes import wintypes
 import os
 import struct
+import tempfile
 import threading
 import uuid
+
+from openmpt_mcp import Sidecar, automatic_target_file
 
 ROOT = Path(__file__).resolve().parent
 
@@ -123,6 +126,74 @@ class SidecarTests(unittest.TestCase):
         result = self.exchange([call()])[0]["result"]
         self.assertTrue(result["isError"])
         self.assertEqual(result["structuredContent"]["error"]["code"], "notAttached")
+
+    def test_target_file_requires_an_openmpt_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "target.json"
+            result = self.exchange([call()], "--target-file", str(missing))[0]["result"]
+        self.assertEqual(result["structuredContent"]["error"]["code"], "notAttached")
+        self.assertIn("Connect active document", result["structuredContent"]["error"]["reason"])
+
+    def test_auto_target_uses_current_user_local_app_data(self):
+        old = os.environ.get("LOCALAPPDATA")
+        try:
+            os.environ["LOCALAPPDATA"] = r"C:\Users\test\AppData\Local"
+            self.assertEqual(automatic_target_file(),
+                             Path(r"C:\Users\test\AppData\Local") / "OpenMPT" / "AI" / "codex-target.json")
+        finally:
+            if old is None:
+                os.environ.pop("LOCALAPPDATA", None)
+            else:
+                os.environ["LOCALAPPDATA"] = old
+
+    def test_target_switch_waits_for_retained_work_to_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target_file = Path(directory) / "target.json"
+            first = {"version": 1, "pipe": r"\\.\pipe\first", "instance": "i1",
+                     "document": "d1", "generation": "g1"}
+            second = {"version": 1, "pipe": r"\\.\pipe\second", "instance": "i2",
+                      "document": "d2", "generation": "g2"}
+            target_file.write_text(json.dumps(first), encoding="utf-8")
+            sidecar = Sidecar(target_file=target_file)
+            self.assertIsNone(sidecar.refresh_target("get_pattern_context"))
+            sidecar.retained_session = True
+            target_file.write_text(json.dumps(second), encoding="utf-8")
+            blocked = sidecar.refresh_target("replace_pattern_segment")
+            self.assertEqual(blocked["error"]["code"], "busy")
+            self.assertEqual(sidecar.document, "d1")
+            self.assertIsNone(sidecar.refresh_target("abort_session"))
+            self.assertEqual(sidecar.document, "d1")
+            sidecar.retained_session = False
+            self.assertIsNone(sidecar.refresh_target("get_pattern_context"))
+            self.assertEqual(sidecar.document, "d2")
+
+    def test_republishing_same_document_clears_latched_attachment_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target_file = Path(directory) / "target.json"
+            target = {"version": 1, "pipe": r"\\.\pipe\same", "instance": "i",
+                      "document": "d", "generation": "g1"}
+            target_file.write_text(json.dumps(target), encoding="utf-8")
+            sidecar = Sidecar(target_file=target_file)
+            self.assertIsNone(sidecar.refresh_target("get_pattern_context"))
+            sidecar.attachment_error = {"ok": False, "error": {"code": "instanceGone"}}
+            target["generation"] = "g2"
+            target_file.write_text(json.dumps(target), encoding="utf-8")
+            self.assertIsNone(sidecar.refresh_target("get_pattern_context"))
+            self.assertIsNone(sidecar.attachment_error)
+
+    @unittest.skipUnless(os.name == "nt", "Windows pipe transport")
+    def test_published_target_attaches_without_cli_identities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target_file = Path(directory) / "target.json"
+            with EndpointDouble([{"ok": True}, {"ok": True, "context": {}}]) as endpoint:
+                target_file.write_text(json.dumps({"version": 1, "pipe": endpoint.path,
+                                                   "instance": "published-instance",
+                                                   "document": "published-document",
+                                                   "generation": "publication-1"}), encoding="utf-8")
+                reply = self.exchange([call()], "--target-file", str(target_file))[0]["result"]
+            self.assertEqual(reply["structuredContent"], {"ok": True, "context": {}})
+            self.assertEqual(endpoint.requests[0]["operation"], "attach")
+            self.assertEqual(endpoint.requests[0]["document"], "published-document")
 
     @unittest.skipUnless(os.name == "nt", "Windows pipe transport")
     def test_typed_application_failures_preserved(self):

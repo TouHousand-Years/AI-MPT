@@ -15,6 +15,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 
@@ -38,6 +39,13 @@ namespace
 constexpr DWORD MaxFrame = 4 * 1024 * 1024;
 std::string UTF8(const CString &s) { return mpt::ToCharset(mpt::Charset::UTF8, mpt::ToUnicode(s)); }
 CString Text(const std::string &s) { return mpt::ToCString(mpt::ToUnicode(mpt::Charset::UTF8, s)); }
+
+std::wstring CodexTargetPath()
+{
+	const wchar_t *local = _wgetenv(L"LOCALAPPDATA");
+	if(!local || !*local) return {};
+	return (std::filesystem::path(local) / L"OpenMPT" / L"AI" / L"codex-target.json").wstring();
+}
 
 // Ticket 30: every AI IPC read, write, and wait registers its thread here for
 // the duration of the operation. The realtime audio callback scans this set to
@@ -285,7 +293,7 @@ CViewPattern *PatternView(CModDoc &doc)
 	return nullptr;
 }
 
-enum Control : UINT { Enable = 1, AlwaysApprove, Timeout, Apply, Reject, Release, Approve, Decline, Refresh, Evidence, SettingsSave };
+enum Control : UINT { Enable = 1, AlwaysApprove, Timeout, Apply, Reject, Release, Approve, Decline, Publish, Evidence, SettingsSave };
 
 class Panel final : public CWnd
 {
@@ -364,7 +372,7 @@ public:
 			auto b = std::make_unique<CButton>(); b->Create(text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rect, this, id); buttons.push_back(std::move(b));
 		};
 		button(SettingsSave, _T("Save settings (seconds)"), CRect(540, 12, 750, 38));
-		button(Refresh, _T("Refresh attachment"), CRect(770, 12, 990, 38));
+		button(Publish, _T("Connect active doc to Codex"), CRect(770, 12, 990, 38));
 		identity.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL, CRect(12, 48, 1040, 155), this, 20);
 		button(Release, _T("RELEASE AI NOW"), CRect(12, 170, 205, 204));
 		button(Approve, _T("Approve expansion"), CRect(215, 170, 410, 204));
@@ -391,6 +399,8 @@ public:
 	{
 		auto *active = CMainFrame::GetMainFrame()->GetActiveDoc();
 		CString value = _T("Pipe: ") + CString(pipe.c_str()) + _T("\r\nInstance: ") + Text(instance);
+		if(const auto target = CodexTargetPath(); !target.empty())
+			value += _T("\r\nCodex target: ") + CString(target.c_str());
 		value += _T("\r\nOpen documents (probe clients must be given one explicit ID):");
 		for(auto *doc : theApp.GetOpenDocuments())
 		{
@@ -478,6 +488,69 @@ public:
 	{
 		if(capability) capability->ForceRelease();
 		if(pending) { pending->Complete(Failure("occupancyLost", "Human released the session")); pending.reset(); }
+	}
+	void PublishActiveDocument()
+	{
+		if(!broker || !broker->Running())
+		{
+			lastMessage = _T("Enable MCP and wait for MCP ready before connecting Codex.");
+			return;
+		}
+		if(capability && (capability->Occupied() || capability->HasProposal()))
+		{
+			lastMessage = _T("Finish or release current AI work before publishing another target.");
+			return;
+		}
+		auto *target = CMainFrame::GetMainFrame()->GetActiveDoc();
+		if(!target)
+		{
+			lastMessage = _T("Open and activate a document before connecting Codex.");
+			return;
+		}
+		const std::wstring path = CodexTargetPath();
+		if(path.empty())
+		{
+			lastMessage = _T("LOCALAPPDATA is unavailable; the Codex target cannot be published.");
+			return;
+		}
+		std::error_code directoryError;
+		std::filesystem::create_directories(std::filesystem::path(path).parent_path(), directoryError);
+		if(directoryError)
+		{
+			lastMessage = _T("Could not create the Codex target directory.");
+			return;
+		}
+		GUID guid{};
+		if(CoCreateGuid(&guid) != S_OK)
+		{
+			lastMessage = _T("Could not create a Codex publication identity.");
+			return;
+		}
+		wchar_t id[40]{};
+		StringFromGUID2(guid, id, 40);
+		const Json published{{"version", 1}, {"pipe", UTF8(CString(pipe.c_str()))}, {"instance", instance},
+			{"document", target->AIIdentity()}, {"generation", UTF8(CString(id))}, {"title", UTF8(target->GetTitle())}};
+		const std::wstring temporary = path + L".tmp-" + std::to_wstring(GetCurrentProcessId());
+		{
+			std::ofstream output(std::filesystem::path(temporary), std::ios::binary | std::ios::trunc);
+			const std::string bytes = published.dump();
+			output.write(bytes.data(), bytes.size());
+			output.close();
+			if(!output)
+			{
+				DeleteFileW(temporary.c_str());
+				lastMessage = _T("Could not write the Codex target file.");
+				return;
+			}
+		}
+		if(!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+		{
+			DeleteFileW(temporary.c_str());
+			lastMessage = _T("Could not publish the Codex target file.");
+			return;
+		}
+		lastMessage = _T("Active document published to Codex. No MCP reconfiguration is needed.");
+		RefreshIdentity();
 	}
 	void HandleDisconnect(const DisconnectNotice &notice)
 	{
@@ -572,7 +645,7 @@ public:
 		try
 		{
 			if(id == Release) ReleaseNow();
-			if(id == Refresh) RefreshIdentity();
+			if(id == Publish) PublishActiveDocument();
 			if(id == SettingsSave || id == Enable || id == AlwaysApprove)
 			{
 				CString value; timeout.GetWindowText(value); seconds = std::clamp(_ttoi(value), 1, 3600);
