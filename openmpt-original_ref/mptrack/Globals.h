@@ -132,11 +132,6 @@ protected:
 	CModTabCtrl m_TabCtrl;
 	std::array<CModControlDlg *, int(Page::NumPages)> m_Pages = {{}};
 	Page m_nActiveDlg = Page::Unknown;
-	// Last dialog of a regular page; the lower view keeps using it while the AI
-	// page is active, because the AI page deliberately does not change the view class.
-	CModControlDlg *m_lastControlDlg = nullptr;
-	// Splitter height to restore when the AI page is selected again.
-	int m_aiSplitterHeight = 0;
 	int m_nInstrumentChanged = -1;
 	HWND m_hWndView = nullptr, m_hWndMDI = nullptr;
 
@@ -153,7 +148,6 @@ public:
 	void SetMDIParentFrame(HWND hwnd) { m_hWndMDI = hwnd; }
 	void ForceRefresh();
 	CModControlDlg *GetCurrentControlDlg() const;
-	CModControlDlg *GetLastControlDlg() const { return m_lastControlDlg; }
 
 protected:
 	void RecalcLayout();
@@ -239,11 +233,7 @@ public:
 	{
 		auto *view = static_cast<CModControlView *>(CWnd::FromHandle(m_hWndCtrl));
 		if(!view) return nullptr;
-		if(CModControlDlg *dlg = view->GetCurrentControlDlg())
-			return dlg;
-		// While the AI page is active, the lower view still belongs to the last
-		// regular page, whose dialog must stay reachable for key forwarding.
-		return view->GetLastControlDlg();
+		return view->GetCurrentControlDlg();
 	}
 
 	void SaveLastFocusItem(HWND hwnd);

@@ -395,15 +395,23 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 	m_TabCtrl.SetCurSel(tabIndex);
 
 	CModControlDlg *oldActiveDlg = GetCurrentControlDlg();
+	CChildFrame *pFrame = static_cast<CChildFrame *>(GetParentFrame());
 	if(oldActiveDlg)
-		oldActiveDlg->GetSplitPosRef() = static_cast<CChildFrame *>(GetParentFrame())->GetSplitterHeight();
+		oldActiveDlg->GetSplitPosRef() = pFrame->GetSplitterHeight();
 	else if(m_nActiveDlg == Page::AI)
-		m_aiSplitterHeight = static_cast<CChildFrame *>(GetParentFrame())->GetSplitterHeight();
+		pFrame->SetAISplitterHeight(pFrame->GetSplitterHeight());
 
 	if(page == m_nActiveDlg)
 	{
 		if(page == Page::AI)
 		{
+			// Re-claim both panes for this document. ChangeViewClass is a no-op
+			// when the dedicated AI view is already the lower row's view.
+			if(pFrame)
+			{
+				pFrame->ChangeViewClass(AI::LowerViewRuntimeClass(), nullptr);
+				pFrame->SetSplitterHeight(pFrame->GetAISplitterHeight() > 1 ? pFrame->GetAISplitterHeight() : AI::DefaultSplitterHeight);
+			}
 			CRect rect;
 			GetClientRect(&rect);
 			m_TabCtrl.AdjustRect(FALSE, &rect);
@@ -421,7 +429,6 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		AI::DetachPanel(this);
 	if(oldActiveDlg)
 	{
-		m_lastControlDlg = oldActiveDlg;
 		OnModCtrlMsg(CTRLMSG_DEACTIVATEPAGE, 0);
 		oldActiveDlg->ShowWindow(SW_HIDE);
 	}
@@ -432,12 +439,15 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		pMainFrm->SetUserText(_T(""));
 		pMainFrm->SetInfoText(_T(""));
 		pMainFrm->SetXInfoText(_T(""));
+		if(pFrame)
+		{
+			pFrame->ChangeViewClass(AI::LowerViewRuntimeClass(), nullptr);
+			pFrame->SetSplitterHeight(pFrame->GetAISplitterHeight() > 1 ? pFrame->GetAISplitterHeight() : AI::DefaultSplitterHeight);
+		}
 		CRect rect;
 		GetClientRect(&rect);
 		m_TabCtrl.AdjustRect(FALSE, &rect);
 		AI::AttachPanel(*this, rect);
-		if(CChildFrame *pFrame = static_cast<CChildFrame *>(GetParentFrame()))
-			pFrame->SetSplitterHeight(m_aiSplitterHeight > 1 ? m_aiSplitterHeight : 560);
 		RecalcLayout();
 		return true;
 	}
@@ -481,7 +491,6 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		m_nActiveDlg = page;
 		m_Pages[static_cast<size_t>(page)] = pDlg;
 	}
-	m_lastControlDlg = pDlg;
 	RecalcLayout();
 	pMainFrm->SetUserText(_T(""));
 	pMainFrm->SetInfoText(_T(""));
@@ -499,7 +508,6 @@ void CModControlView::OnDestroy()
 	// Detach before this view (and with it the embedded panel) is destroyed.
 	AI::DetachPanel(this);
 	m_nActiveDlg = Page::Unknown;
-	m_lastControlDlg = nullptr;
 	for(auto &pDlg : m_Pages)
 	{
 		if(pDlg)
@@ -626,20 +634,22 @@ afx_msg void CModControlView::OnSwitchToView() { if(m_hWndView) ::PostMessage(m_
 
 LRESULT CModControlView::OnModCtrlMsg(WPARAM wParam, LPARAM lParam)
 {
-	CModControlDlg *pActiveDlg = GetCurrentControlDlg();
-	if(!pActiveDlg)
-		return 0;
-	switch(wParam)
+	// The AI page has no active dialog, but the dedicated lower view still posts
+	// its window handle here; track it so focus forwarding and edit commands
+	// reach the current lower pane. When a regular page is active, the message
+	// is still forwarded below so its view-specific setup runs.
+	if(wParam == CTRLMSG_SETVIEWWND)
 	{
-	case CTRLMSG_SETVIEWWND:
 		m_hWndView = reinterpret_cast<HWND>(lParam);
 		for(CModControlDlg *dlg : m_Pages)
 		{
 			if(dlg)
 				dlg->SetViewWnd(m_hWndView);
 		}
-		break;
 	}
+	CModControlDlg *pActiveDlg = GetCurrentControlDlg();
+	if(!pActiveDlg)
+		return 0;
 	return pActiveDlg->OnModCtrlMsg(wParam, lParam);
 }
 

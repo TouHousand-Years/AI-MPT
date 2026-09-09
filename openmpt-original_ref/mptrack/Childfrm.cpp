@@ -107,8 +107,8 @@ void CChildFrame::SetSplitterHeight(int cy)
 	if (cy <= 1) cy = 188;	//default to 188? why not..
 	cy = HighDPISupport::ScalePixels(cy, m_hWnd);
 	m_wndSplitter.SetRowInfo(0, cy, 15);
-	// The AI page does not change the lower view class, so the row info has to be
-	// applied immediately instead of waiting for a view class change.
+	// The AI page changes the lower view class synchronously; applying the row
+	// info immediately keeps the upper and lower panes in step on every switch.
 	if(m_wndSplitter.GetSafeHwnd())
 		m_wndSplitter.RecalcLayout();
 }
@@ -122,6 +122,12 @@ LRESULT CChildFrame::OnDPIChangedAfterParent(WPARAM, LPARAM)
 		if(CModControlDlg *pDlg = pModView->GetCurrentControlDlg())
 		{
 			SetSplitterHeight(pDlg->GetSplitPosRef());
+			m_wndSplitter.RecalcLayout();
+		} else if(pModView->GetActivePage() == CModControlView::Page::AI)
+		{
+			// The AI page has no CModControlDlg; rescale its remembered height
+			// instead of writing it into a regular page's setting.
+			SetSplitterHeight(m_aiSplitterHeight > 1 ? m_aiSplitterHeight : AI::DefaultSplitterHeight);
 			m_wndSplitter.RecalcLayout();
 		}
 	}

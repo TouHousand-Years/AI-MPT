@@ -9,6 +9,8 @@
 #include "Mainfrm.h"
 #include "View_pat.h"
 #include "UpdateHints.h"
+#include "Globals.h"
+#include "WindowMessages.h"
 #include <sddl.h>
 #include <atomic>
 #include <thread>
@@ -336,6 +338,33 @@ CViewPattern *PatternView(CModDoc &doc)
 
 enum Control : UINT { Enable = 1, AlwaysApprove, Timeout, Apply, Reject, Release, Approve, Decline, Publish, Evidence, SettingsSave };
 
+class Panel;
+class ReviewPanel;
+
+// Issue 36: the review half of the AI page is its own child window so the
+// dedicated lower splitter view (CViewAI) can host it. Keeping it separate from
+// the connection panel lets the service state (broker, capability, review
+// data) survive page switches while the UI follows the splitter view.
+class ReviewPanel final : public CWnd
+{
+public:
+	Panel *service = nullptr;
+	CButton release, approve, decline, apply, reject;
+	CListBox evidence;
+	CRect statusRect, listRect, evidenceRect;
+
+	ReviewPanel(CWnd &owner, Panel &servicePanel);
+	void LayoutChildren();
+	void Refresh();
+	void UpdateControls();
+	void RefreshStatus();
+	void DrawEvidence(CDC &dc);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnPaint();
+	BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
+	DECLARE_MESSAGE_MAP()
+};
+
 class Panel final : public CWnd
 {
 public:
@@ -354,7 +383,6 @@ public:
 	std::shared_ptr<Request> pending;
 	CButton enable, always;
 	CEdit timeout, identity;
-	CListBox evidence;
 	std::vector<std::unique_ptr<CButton>> buttons;
 	std::string instance;
 	// The connection that owns retained (potentially mutating) capability state.
@@ -368,7 +396,7 @@ public:
 	PatternCursor selectionAnchor;
 	uint64 displayedRevision = 0;
 	CString lastMessage;
-	CRect identityRect, stateRect, listRect, evidenceRect;
+	CRect identityRect;
 	// Main frame is the safe parking parent while no control view shows the panel.
 	CWnd *parking = nullptr;
 #ifdef ENABLE_TESTS
@@ -416,13 +444,6 @@ public:
 		button(SettingsSave, _T("Save settings (seconds)"), CRect(540, 12, 750, 38));
 		button(Publish, _T("Connect active doc to Codex"), CRect(770, 12, 990, 38));
 		identity.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL, CRect(12, 48, 1040, 155), this, 20);
-		button(Release, _T("RELEASE AI NOW"), CRect(12, 170, 205, 204));
-		button(Approve, _T("Approve expansion"), CRect(215, 170, 410, 204));
-		button(Decline, _T("Decline expansion"), CRect(420, 170, 615, 204));
-		button(Apply, _T("Apply whole proposal"), CRect(625, 170, 820, 204));
-		button(Reject, _T("Reject whole proposal"), CRect(830, 170, 1035, 204));
-		evidence.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, CRect(12, 265, 1040, 460), this, Evidence);
-		evidence.SetFont(CFont::FromHandle(static_cast<HFONT>(GetStockObject(ANSI_FIXED_FONT))));
 		LayoutChildren();
 		if(enable.GetCheck()) broker = CreateBroker();
 		SetTimer(1, 100, nullptr);
@@ -440,7 +461,8 @@ public:
 	void RefreshIdentity()
 	{
 		auto *active = CMainFrame::GetMainFrame()->GetActiveDoc();
-		CString value = _T("Pipe: ") + CString(pipe.c_str()) + _T("\r\nInstance: ") + Text(instance);
+		CString value = (broker && broker->Running()) ? _T("Status: MCP ready") : _T("Status: MCP stopped / starting");
+		value += _T("\r\nPipe: ") + CString(pipe.c_str()) + _T("\r\nInstance: ") + Text(instance);
 		if(const auto target = CodexTargetPath(); !target.empty())
 			value += _T("\r\nCodex target: ") + CString(target.c_str());
 		value += _T("\r\nOpen documents (probe clients must be given one explicit ID):");
@@ -457,68 +479,30 @@ public:
 			identity.SetWindowText(value);
 		}
 	}
-	// Issue 35: the panel is embedded in the tab client area, so every control
-	// is repositioned to the current client size. Rows keep their order and the
-	// critical action buttons stay above the evidence areas at any size.
+	// Issue 36: the upper row only holds the MCP connection and configuration
+	// controls; the review controls live in the dedicated lower view. The identity
+	// list takes all remaining vertical space.
 	void LayoutChildren()
 	{
-		if(!GetSafeHwnd() || !enable.GetSafeHwnd() || !identity.GetSafeHwnd() || !evidence.GetSafeHwnd()) return;
+		if(!GetSafeHwnd() || !enable.GetSafeHwnd() || !identity.GetSafeHwnd()) return;
 		CRect client;
 		GetClientRect(&client);
 		const int cx = std::max<int>(client.Width(), 320);
-		const int cy = std::max<int>(client.Height(), 240);
 		const double sx = std::clamp((cx - 24.0) / (1052.0 - 24.0), 0.4, 2.0);
 		const auto X = [sx](int x) { return static_cast<int>((x - 12) * sx + 12.5); };
-
-		// Vertical budget: top row (26), identity (107), buttons (34), state (45),
-		// evidence list (195) and drawn evidence (205) with their gaps add up to
-		// 692. Shrink the three flexible areas first, then scale everything if
-		// the page becomes smaller than their combined minimum.
-		int identityH = 107, listH = 195, drawnH = 205;
-		if(cy < 692)
-		{
-			const int available = std::max(cy - 185, 0);
-			const int minSum = 45 + 60 + 60, baseFlex = 107 + 195 + 205;
-			if(available >= minSum)
-			{
-				const int span = available - minSum;
-				identityH = 45 + (107 - 45) * span / (baseFlex - minSum);
-				listH = 60 + (195 - 60) * span / (baseFlex - minSum);
-				drawnH = 60 + (205 - 60) * span / (baseFlex - minSum);
-			} else
-			{
-				identityH = std::max(18, 107 * available / baseFlex);
-				listH = std::max(18, 195 * available / baseFlex);
-				drawnH = std::max(18, 205 * available / baseFlex);
-			}
-		}
-		int y = 12;
-		const int topRow = y; y += 26 + 10;
-		const int identityTop = y; y += identityH + 15;
-		const int buttonsTop = y; y += 34 + 11;
-		const int stateTop = y; y += 45 + 5;
-		const int listTop = y; y += listH + 15;
-		const int drawnTop = y;
-
-		identityRect.SetRect(X(12), identityTop, X(1040), identityTop + identityH);
-		stateRect.SetRect(X(12), stateTop, X(1040), stateTop + 45);
-		listRect.SetRect(X(12), listTop, X(1040), listTop + listH);
-		evidenceRect.SetRect(X(12), drawnTop, X(1040), drawnTop + drawnH);
-
 		const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+		const int topRow = 12;
 		enable.SetWindowPos(nullptr, X(12), topRow, std::max(40, X(150) - X(12)), 26, flags);
 		always.SetWindowPos(nullptr, X(160), topRow, std::max(40, X(460) - X(160)), 26, flags);
 		timeout.SetWindowPos(nullptr, X(470), topRow, std::max(30, X(530) - X(470)), 26, flags);
+		const CRect buttonBase[]{CRect(540, 12, 750, 38), CRect(770, 12, 990, 38)};
+		for(size_t i = 0; i < buttons.size() && i < 2; i++)
+			buttons[i]->SetWindowPos(nullptr, X(buttonBase[i].left), topRow,
+				std::max(40, X(buttonBase[i].right) - X(buttonBase[i].left)), 26, flags);
+		const int identityTop = topRow + 26 + 10;
+		const int identityBottom = std::max(identityTop + 18, client.Height() - 12);
+		identityRect.SetRect(X(12), identityTop, X(1040), identityBottom);
 		identity.SetWindowPos(nullptr, identityRect.left, identityRect.top, identityRect.Width(), identityRect.Height(), flags);
-		evidence.SetWindowPos(nullptr, listRect.left, listRect.top, listRect.Width(), listRect.Height(), flags);
-		const CRect buttonBase[]{CRect(540, 12, 750, 38), CRect(770, 12, 990, 38), CRect(12, 170, 205, 204),
-			CRect(215, 170, 410, 204), CRect(420, 170, 615, 204), CRect(625, 170, 820, 204), CRect(830, 170, 1035, 204)};
-		for(size_t i = 0; i < buttons.size() && i < 7; i++)
-		{
-			const bool top = buttonBase[i].bottom <= 38;
-			buttons[i]->SetWindowPos(nullptr, X(buttonBase[i].left), top ? topRow : buttonsTop,
-				std::max(40, X(buttonBase[i].right) - X(buttonBase[i].left)), top ? 26 : 34, flags);
-		}
 		Invalidate(FALSE);
 	}
 	afx_msg void OnSize(UINT nType, int cx, int cy)
@@ -536,7 +520,7 @@ public:
 	{
 		if(!broker || !broker->Running())
 		{
-			lastMessage = _T("Enable MCP and wait for MCP ready before connecting Codex.");
+			lastMessage = _T("Enable MCP and wait for the service to start before connecting Codex.");
 			return;
 		}
 		if(capability && (capability->Occupied() || capability->HasProposal()))
@@ -665,230 +649,447 @@ public:
 		if(row >= sf.Patterns[capability->Pattern()].GetNumRows() || channel >= sf.GetNumChannels()) return {};
 		return *sf.Patterns[capability->Pattern()].GetpModCommand(row, channel);
 	}
-	void RefreshReview()
-	{
-		// Commands such as EN_CHANGE from the timeout edit re-enter here while
-		// the constructor is still creating child controls.
-		if(!evidence.GetSafeHwnd()) return;
-		review = capability && capability->HasProposal() ? capability->Review() : Json{};
-		evidence.ResetContent();
-		if(review.is_object() && review.value("ok", false))
-		{
-			for(const auto &cell : review.at("diff"))
-			{
-				const int row = cell.at("row").get<int>(), channel = cell.at("channel").get<int>();
-				const auto &sf = document->GetSoundFile();
-				const auto live = CurrentCell(cell);
-				const CString liveName = live ? mpt::ToCString(sf.GetNoteName(live->note, live->instr)) : CString(_T("unavailable"));
-				CString line; line.Format(_T("Row %03d Ch %02d  |  %s  ->  %s  |  current %s"), row, channel + 1,
-					mpt::ToCString(sf.GetNoteName(cell["before"]["note"].get<uint8>(), cell["before"]["instrument"].get<uint8>())).GetString(),
-					mpt::ToCString(sf.GetNoteName(cell["after"]["note"].get<uint8>(), cell["after"]["instrument"].get<uint8>())).GetString(), liveName.GetString());
-				evidence.AddString(line);
-			}
-		}
-		Invalidate(FALSE);
-	}
-	BOOL OnCommand(WPARAM wParam, LPARAM lParam) override
-	{
-		const UINT id = LOWORD(wParam);
-		try
-		{
-			if(id == Release) ReleaseNow();
-			if(id == Publish) PublishActiveDocument();
-			if(id == SettingsSave || id == Enable || id == AlwaysApprove)
-			{
-				CString value; timeout.GetWindowText(value); seconds = std::clamp(_ttoi(value), 1, 3600);
-				theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("Enabled"), enable.GetCheck() != 0);
-				theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysApprove"), always.GetCheck() != 0);
-				theApp.GetSettings().Write<unsigned>(U_("AI/MCP"), U_("TimeoutSeconds"), seconds);
-				if(!enable.GetCheck()) { ReleaseNow(); broker.reset(); }
-				else if(!broker) broker = CreateBroker();
-				if(capability) capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
-			}
-			if((id == Approve || id == Decline) && pending && capability)
-			{
-				pending->Complete(capability->ResolveExpansion(id == Approve)); pending.reset();
-			}
-			if(id == Apply && capability) lastMessage = Text(capability->Apply().dump());
-			if(id == Reject && capability) { capability->Reject(); lastMessage = _T("Proposal rejected."); }
-			if(id == Evidence && HIWORD(wParam) == LBN_SELCHANGE && document && capability)
-			{
-				const int index = evidence.GetCurSel();
-				if(index >= 0 && review.contains("diff") && size_t(index) < review["diff"].size())
-				{
-					const auto &cell = review["diff"][index];
-					if(auto *view = PatternView(*document))
-					{
-						view->SetCurrentPattern(capability->Pattern());
-						PatternCursor cursor(cell["row"].get<ROWINDEX>(), cell["channel"].get<CHANNELINDEX>());
-						view->SetCursorPosition(cursor); view->SetCurSel(cursor); view->InvalidatePattern();
-					}
-				}
-				Invalidate(FALSE); return TRUE;
-			}
-			RefreshReview();
-		} catch(const std::exception &) { lastMessage = _T("Operation failed; document was not changed."); }
-		return CWnd::OnCommand(wParam, lParam);
-	}
-	afx_msg void OnTimer(UINT_PTR)
-	{
-		try
-		{
-#ifdef ENABLE_TESTS
-			if(testDeadline)
-			{
-				if(!testReport.empty() && GetTickCount64() >= tickTrace)
-				{
-					tickTrace = GetTickCount64() + 2000;
-					TestTrace(std::string("tick broker=") + (broker && broker->Running() ? "1" : "0")
-						+ " view=" + (document && PatternView(*document) ? "1" : "0")
-						+ " doc=" + (document ? "1" : "0"));
-				}
-				const wchar_t *stop = _wgetenv(L"OPENMPT_AI_STOP_FILE");
-				if(GetTickCount64() >= testDeadline || (stop && GetFileAttributesW(stop) != INVALID_FILE_ATTRIBUTES))
-				{
-					ReleaseNow(); CMainFrame::GetMainFrame()->PostMessage(WM_CLOSE); return;
-				}
-				if(!testReport.empty() && document && broker && broker->Running())
-					if(auto *view = PatternView(*document))
-					{
-						const wchar_t *pattern = _wgetenv(L"OPENMPT_AI_PATTERN");
-						const PATTERNINDEX wanted = pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0;
-						view->SetCurrentPattern(wanted);
-						// The harness plays audio while binding patterns; follow-song
-						// would drag the view back to the playing pattern and break
-						// the explicit binding under test.
-						if(document->GetFollowWnd() == view->m_hWnd)
-						{
-							document->SetFollowWnd(nullptr);
-							TestTrace("endpoint: follow-song disabled");
-						}
-						// Pattern page initialization completes asynchronously after
-						// the view appears and resets the current pattern once more;
-						// publish the endpoint only when the requested pattern has
-						// stayed bound across two consecutive ticks.
-						const PATTERNINDEX bound = view->GetCurrentPattern();
-						const bool settled = bound == wanted && patternSettle == wanted;
-						patternSettle = bound;
-						if(settled)
-						{
-							Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
-							const std::wstring tmp = testReport + L".tmp";
-							std::ofstream(tmp) << info.dump();
-							if(_wrename(tmp.c_str(), testReport.c_str()) == 0) TestTrace("endpoint written");
-							else TestTrace("endpoint rename failed err=" + std::to_string(GetLastError()));
-							testReport.clear();
-							patternSettle = PATTERNINDEX_INVALID;
-						} else TestTrace("endpoint: pattern not settled yet");
-					}
-			}
-#endif
-			RefreshIdentity();
-			if(capability) capability->Tick();
-			if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
-			if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
-			// Ticket 31 AC4: drain disconnect notices before new work so a
-			// vanished client's occupancy is released before its successor's
-			// reattach is dispatched.
-			if(broker)
-				while(auto notice = broker->PopDisconnect())
-					HandleDisconnect(*notice);
-			// Keep draining other connections while one request waits for human
-			// approval. Dispatch rejects their capability calls as busy, but attach
-			// and the reply itself no longer queue behind an unrelated writer.
-			if(broker)
-				if(auto request = broker->Pop())
-				{
-					Json result;
-					try
-					{
-#ifdef ENABLE_TESTS
-						// Deterministically exercise the dispatch-time liveness recheck:
-						// the transport request has already been queued and popped before
-						// the explicitly addressed document is closed here.
-						if(request->envelope.value("test_close_before_dispatch", false))
-						{
-							for(auto *doc : theApp.GetOpenDocuments())
-								if(request->envelope.at("document") == doc->AIIdentity())
-								{
-									doc->OnCloseDocument();
-									break;
-								}
-						}
-#endif
-						result = Dispatch(request->envelope, request->connection);
-					}
-					catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid request", "transport"); }
-					catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }
-					if(result.value("pending_approval", false)) pending = request;
-					else request->Complete(result);
-					RefreshReview();
-				}
-			GetDlgItem(Approve)->EnableWindow(pending != nullptr); GetDlgItem(Decline)->EnableWindow(pending != nullptr);
-			GetDlgItem(Apply)->EnableWindow(capability && capability->HasProposal()); GetDlgItem(Reject)->EnableWindow(capability && capability->HasProposal());
-			InvalidateRect(stateRect, FALSE);
-		} catch(...) { lastMessage = _T("AI service error."); }
-	}
-	afx_msg void OnPaint()
-	{
-		CPaintDC dc(this);
-		dc.FillSolidRect(stateRect, GetSysColor(COLOR_WINDOW));
-		CString state = broker && broker->Running() ? _T("MCP ready") : _T("MCP stopped / starting");
-		if(capability && capability->Occupied()) state += pending ? _T(" | AI OCCUPIED - expansion approval waiting (timer paused)") : _T(" | AI OCCUPIED - navigation and playback available; writes blocked");
-		if(review.is_object() && review.contains("status")) state += _T(" | Proposal ") + Text(review["status"].get<std::string>());
-		dc.TextOut(stateRect.left, stateRect.top + 1, state);
-		if(pending && capability)
-		{
-			const auto range = capability->ExpansionRange();
-			CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
-				range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
-				range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
-			dc.TextOut(stateRect.left, stateRect.top + 23, grant);
-		} else dc.TextOut(stateRect.left, stateRect.top + 23, lastMessage);
-		DrawEvidence(dc);
-	}
-	void DrawEvidence(CDC &dc)
-	{
-		dc.FillSolidRect(evidenceRect, RGB(25, 28, 35));
-		if(!review.is_object() || !review.contains("diff") || review["diff"].empty()) return;
-		const auto &diff = review["diff"];
-		int first = INT_MAX, last = 0, low = 128, high = 1;
-		for(const auto &cell : diff)
-		{
-			first = std::min(first, cell["row"].get<int>()); last = std::max(last, cell["row"].get<int>());
-			for(const char *version : {"before", "after"}) { int n = cell[version]["note"].get<int>(); if(n >= 1 && n <= 128) { low = std::min(low, n); high = std::max(high, n); } }
-			if(const auto live = CurrentCell(cell); live && live->IsNote()) { low = std::min<int>(low, live->note); high = std::max<int>(high, live->note); }
-		}
-		if(low > high) { low = 48; high = 72; }
-		const int column = std::max(1, evidenceRect.Width() / 3);
-		const int plotTop = evidenceRect.top + 20, plotBottom = std::max(plotTop + 1, static_cast<int>(evidenceRect.bottom) - 14);
-		const int plotHeight = plotBottom - plotTop;
-		for(int projection = 0; projection < 3; ++projection)
-		{
-			const int x = evidenceRect.left + 8 + projection * column;
-			dc.SetTextColor(RGB(230, 235, 240)); dc.SetBkMode(TRANSPARENT);
-			dc.TextOut(x, evidenceRect.top + 4, projection == 0 ? _T("Baseline") : projection == 1 ? _T("Proposal") : _T("Current document"));
-			for(const auto &cell : diff)
-			{
-				int note = cell[projection == 0 ? "before" : "after"]["note"].get<int>();
-				if(projection == 2) { const auto live = CurrentCell(cell); note = live ? live->note : 0; }
-				int px = x + (cell["row"].get<int>() - first) * std::max(1, column - 30) / std::max(1, last - first + 1);
-				if(note >= 1 && note <= 128)
-				{
-					int py = plotBottom - (note - low) * plotHeight / std::max(1, high - low);
-					dc.FillSolidRect(CRect(px, py, px + 7, py + 6), RGB(100, 180, 240));
-				} else dc.FillSolidRect(CRect(px, plotBottom - 5, px + 5, plotBottom), RGB(240, 165, 70));
-			}
-		}
-	}
+	void RefreshReview();
+	BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
+	afx_msg void OnTimer(UINT_PTR);
 	DECLARE_MESSAGE_MAP()
 };
+std::unique_ptr<Panel> panel;
+std::unique_ptr<ReviewPanel> reviewPanel;
+
+void Panel::RefreshReview()
+{
+	// Commands such as EN_CHANGE from the timeout edit can re-enter here while
+	// the constructor is still creating child controls; reviewPanel is null then.
+	review = capability && capability->HasProposal() ? capability->Review() : Json{};
+	if(reviewPanel) reviewPanel->Refresh();
+}
+
+BOOL Panel::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	const UINT id = LOWORD(wParam);
+	try
+	{
+		if(id == Publish) PublishActiveDocument();
+		if(id == SettingsSave || id == Enable || id == AlwaysApprove)
+		{
+			CString value; timeout.GetWindowText(value); seconds = std::clamp(_ttoi(value), 1, 3600);
+			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("Enabled"), enable.GetCheck() != 0);
+			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysApprove"), always.GetCheck() != 0);
+			theApp.GetSettings().Write<unsigned>(U_("AI/MCP"), U_("TimeoutSeconds"), seconds);
+			if(!enable.GetCheck()) { ReleaseNow(); broker.reset(); }
+			else if(!broker) broker = CreateBroker();
+			if(capability) capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
+		}
+		RefreshReview();
+	} catch(const std::exception &) { lastMessage = _T("Operation failed; document was not changed."); }
+	return CWnd::OnCommand(wParam, lParam);
+}
+
+void Panel::OnTimer(UINT_PTR)
+{
+	try
+	{
+#ifdef ENABLE_TESTS
+		if(testDeadline)
+		{
+			if(!testReport.empty() && GetTickCount64() >= tickTrace)
+			{
+				tickTrace = GetTickCount64() + 2000;
+				TestTrace(std::string("tick broker=") + (broker && broker->Running() ? "1" : "0")
+					+ " view=" + (document && PatternView(*document) ? "1" : "0")
+					+ " doc=" + (document ? "1" : "0"));
+			}
+			const wchar_t *stop = _wgetenv(L"OPENMPT_AI_STOP_FILE");
+			if(GetTickCount64() >= testDeadline || (stop && GetFileAttributesW(stop) != INVALID_FILE_ATTRIBUTES))
+			{
+				ReleaseNow(); CMainFrame::GetMainFrame()->PostMessage(WM_CLOSE); return;
+			}
+			if(!testReport.empty() && document && broker && broker->Running())
+				if(auto *view = PatternView(*document))
+				{
+					const wchar_t *pattern = _wgetenv(L"OPENMPT_AI_PATTERN");
+					const PATTERNINDEX wanted = pattern ? static_cast<PATTERNINDEX>(_wtoi(pattern)) : 0;
+					view->SetCurrentPattern(wanted);
+					// The harness plays audio while binding patterns; follow-song
+					// would drag the view back to the playing pattern and break
+					// the explicit binding under test.
+					if(document->GetFollowWnd() == view->m_hWnd)
+					{
+						document->SetFollowWnd(nullptr);
+						TestTrace("endpoint: follow-song disabled");
+					}
+					// Pattern page initialization completes asynchronously after
+					// the view appears and resets the current pattern once more;
+					// publish the endpoint only when the requested pattern has
+					// stayed bound across two consecutive ticks.
+					const PATTERNINDEX bound = view->GetCurrentPattern();
+					const bool settled = bound == wanted && patternSettle == wanted;
+					patternSettle = bound;
+					if(settled)
+					{
+						Json info{{"pipe", UTF8(pipe.c_str())}, {"instance", instance}, {"document", document->AIIdentity()}};
+						const std::wstring tmp = testReport + L".tmp";
+						std::ofstream(tmp) << info.dump();
+						if(_wrename(tmp.c_str(), testReport.c_str()) == 0) TestTrace("endpoint written");
+						else TestTrace("endpoint rename failed err=" + std::to_string(GetLastError()));
+						testReport.clear();
+						patternSettle = PATTERNINDEX_INVALID;
+					} else TestTrace("endpoint: pattern not settled yet");
+				}
+		}
+#endif
+		RefreshIdentity();
+		if(capability) capability->Tick();
+		if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
+		if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
+		// Ticket 31 AC4: drain disconnect notices before new work so a
+		// vanished client's occupancy is released before its successor's
+		// reattach is dispatched.
+		if(broker)
+			while(auto notice = broker->PopDisconnect())
+				HandleDisconnect(*notice);
+		// Keep draining other connections while one request waits for human
+		// approval. Dispatch rejects their capability calls as busy, but attach
+		// and the reply itself no longer queue behind an unrelated writer.
+		if(broker)
+			if(auto request = broker->Pop())
+			{
+				Json result;
+				try
+				{
+#ifdef ENABLE_TESTS
+					// Deterministically exercise the dispatch-time liveness recheck:
+					// the transport request has already been queued and popped before
+					// the explicitly addressed document is closed here.
+					if(request->envelope.value("test_close_before_dispatch", false))
+					{
+						for(auto *doc : theApp.GetOpenDocuments())
+							if(request->envelope.at("document") == doc->AIIdentity())
+							{
+								doc->OnCloseDocument();
+								break;
+							}
+					}
+#endif
+					result = Dispatch(request->envelope, request->connection);
+				}
+				catch(const Json::exception &) { result = Failure("schemaFailure", "Invalid request", "transport"); }
+				catch(const std::exception &) { result = Failure("internalError", "Application capability failed"); }
+				if(result.value("pending_approval", false)) pending = request;
+				else request->Complete(result);
+				RefreshReview();
+			}
+		if(reviewPanel)
+		{
+			reviewPanel->UpdateControls();
+			reviewPanel->RefreshStatus();
+		}
+	} catch(...) { lastMessage = _T("AI service error."); }
+}
+
+ReviewPanel::ReviewPanel(CWnd &owner, Panel &servicePanel) : service(&servicePanel)
+{
+	// Issue 36: a plain child window (not the CModScrollView itself, whose
+	// WindowProc blocks WM_COMMAND while the document is AI-occupied). It is
+	// created directly inside the dedicated lower view.
+	CreateEx(0, AfxRegisterWndClass(0, LoadCursor(nullptr, IDC_ARROW), reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)),
+		_T("AI / MCP - Review"), WS_CHILD, CRect(0, 0, 1040, 420), &owner, 0);
+	release.Create(_T("RELEASE AI NOW"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(12, 170, 205, 204), this, Release);
+	approve.Create(_T("Approve expansion"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(215, 170, 410, 204), this, Approve);
+	decline.Create(_T("Decline expansion"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(420, 170, 615, 204), this, Decline);
+	apply.Create(_T("Apply whole proposal"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(625, 170, 820, 204), this, Apply);
+	reject.Create(_T("Reject whole proposal"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(830, 170, 1035, 204), this, Reject);
+	evidence.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, CRect(12, 265, 1040, 460), this, Evidence);
+	evidence.SetFont(CFont::FromHandle(static_cast<HFONT>(GetStockObject(ANSI_FIXED_FONT))));
+	LayoutChildren();
+	UpdateControls();
+}
+
+void ReviewPanel::LayoutChildren()
+{
+	if(!GetSafeHwnd() || !release.GetSafeHwnd() || !evidence.GetSafeHwnd()) return;
+	CRect client;
+	GetClientRect(&client);
+	const int cx = std::max<int>(client.Width(), 320);
+	const int cy = std::max<int>(client.Height(), 90);
+	const double sx = std::clamp((cx - 24.0) / (1052.0 - 24.0), 0.4, 2.0);
+	const auto X = [sx](int x) { return static_cast<int>((x - 12) * sx + 12.5); };
+	const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
+
+	int y = 8;
+	const int statusH = std::min(45, std::max(30, cy / 5));
+	statusRect.SetRect(X(12), y, X(1040), y + statusH);
+	y += statusH + 6;
+	const int buttonsTop = y;
+	y += 34 + 6;
+	const int remaining = std::max(0, cy - y - 8);
+	const int listH = std::max(16, remaining * 2 / 5);
+	const int drawnH = std::max(16, remaining - listH - 6);
+	listRect.SetRect(X(12), y, X(1040), y + listH);
+	y += listH + 6;
+	evidenceRect.SetRect(X(12), y, X(1040), y + drawnH);
+
+	release.SetWindowPos(nullptr, X(12), buttonsTop, std::max(40, X(205) - X(12)), 34, flags);
+	approve.SetWindowPos(nullptr, X(215), buttonsTop, std::max(40, X(410) - X(215)), 34, flags);
+	decline.SetWindowPos(nullptr, X(420), buttonsTop, std::max(40, X(615) - X(420)), 34, flags);
+	apply.SetWindowPos(nullptr, X(625), buttonsTop, std::max(40, X(820) - X(625)), 34, flags);
+	reject.SetWindowPos(nullptr, X(830), buttonsTop, std::max(40, X(1035) - X(830)), 34, flags);
+	evidence.SetWindowPos(nullptr, listRect.left, listRect.top, listRect.Width(), listRect.Height(), flags);
+	Invalidate(FALSE);
+}
+
+void ReviewPanel::Refresh()
+{
+	if(!service || !evidence.GetSafeHwnd()) return;
+	evidence.ResetContent();
+	const Json &review = service->review;
+	if(review.is_object() && review.value("ok", false) && service->document)
+	{
+		const auto &sf = service->document->GetSoundFile();
+		for(const auto &cell : review.at("diff"))
+		{
+			const int row = cell.at("row").get<int>(), channel = cell.at("channel").get<int>();
+			const auto live = service->CurrentCell(cell);
+			const CString liveName = live ? mpt::ToCString(sf.GetNoteName(live->note, live->instr)) : CString(_T("unavailable"));
+			CString line; line.Format(_T("Row %03d Ch %02d  |  %s  ->  %s  |  current %s"), row, channel + 1,
+				mpt::ToCString(sf.GetNoteName(cell["before"]["note"].get<uint8>(), cell["before"]["instrument"].get<uint8>())).GetString(),
+				mpt::ToCString(sf.GetNoteName(cell["after"]["note"].get<uint8>(), cell["after"]["instrument"].get<uint8>())).GetString(), liveName.GetString());
+			evidence.AddString(line);
+		}
+	}
+	UpdateControls();
+	Invalidate(FALSE);
+}
+
+void ReviewPanel::UpdateControls()
+{
+	if(!service || !GetSafeHwnd()) return;
+	approve.EnableWindow(service->pending != nullptr);
+	decline.EnableWindow(service->pending != nullptr);
+	apply.EnableWindow(service->capability && service->capability->HasProposal());
+	reject.EnableWindow(service->capability && service->capability->HasProposal());
+}
+
+void ReviewPanel::RefreshStatus()
+{
+	if(!GetSafeHwnd()) return;
+	InvalidateRect(statusRect, FALSE);
+}
+
+void ReviewPanel::OnSize(UINT nType, int cx, int cy)
+{
+	CWnd::OnSize(nType, cx, cy);
+	LayoutChildren();
+}
+
+void ReviewPanel::OnPaint()
+{
+	CPaintDC dc(this);
+	dc.FillSolidRect(statusRect, GetSysColor(COLOR_WINDOW));
+	// The upper connection panel is the home of MCP status; this pane only
+	// reports review state so connection information is never duplicated here.
+	CString state;
+	if(service && service->capability && service->capability->Occupied())
+		state = service->pending ? _T("AI OCCUPIED - expansion approval waiting (timer paused)") : _T("AI OCCUPIED - navigation and playback available; writes blocked");
+	else if(service && service->capability && service->capability->HasProposal())
+		state = _T("AI released - proposal retained for review");
+	else
+		state = _T("Review idle - no AI session or proposal");
+	if(service && service->review.is_object() && service->review.contains("status"))
+		state += _T(" | Proposal ") + Text(service->review["status"].get<std::string>());
+	dc.TextOut(statusRect.left, statusRect.top + 1, state);
+	if(service && service->pending && service->capability)
+	{
+		const auto range = service->capability->ExpansionRange();
+		CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
+			range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
+			range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
+		dc.TextOut(statusRect.left, statusRect.top + 23, grant);
+	} else if(service)
+		dc.TextOut(statusRect.left, statusRect.top + 23, service->lastMessage);
+	DrawEvidence(dc);
+}
+
+void ReviewPanel::DrawEvidence(CDC &dc)
+{
+	dc.FillSolidRect(evidenceRect, RGB(25, 28, 35));
+	if(!service) return;
+	const Json &review = service->review;
+	if(!review.is_object() || !review.contains("diff") || review["diff"].empty()) return;
+	const auto &diff = review["diff"];
+	int first = INT_MAX, last = 0, low = 128, high = 1;
+	for(const auto &cell : diff)
+	{
+		first = std::min(first, cell["row"].get<int>()); last = std::max(last, cell["row"].get<int>());
+		for(const char *version : {"before", "after"}) { int n = cell[version]["note"].get<int>(); if(n >= 1 && n <= 128) { low = std::min(low, n); high = std::max(high, n); } }
+		if(const auto live = service->CurrentCell(cell); live && live->IsNote()) { low = std::min<int>(low, live->note); high = std::max<int>(high, live->note); }
+	}
+	if(low > high) { low = 48; high = 72; }
+	const int column = std::max(1, evidenceRect.Width() / 3);
+	const int plotTop = evidenceRect.top + 20, plotBottom = std::max(plotTop + 1, static_cast<int>(evidenceRect.bottom) - 14);
+	const int plotHeight = plotBottom - plotTop;
+	for(int projection = 0; projection < 3; ++projection)
+	{
+		const int x = evidenceRect.left + 8 + projection * column;
+		dc.SetTextColor(RGB(230, 235, 240)); dc.SetBkMode(TRANSPARENT);
+		dc.TextOut(x, evidenceRect.top + 4, projection == 0 ? _T("Baseline") : projection == 1 ? _T("Proposal") : _T("Current document"));
+		for(const auto &cell : diff)
+		{
+			int note = cell[projection == 0 ? "before" : "after"]["note"].get<int>();
+			if(projection == 2) { const auto live = service->CurrentCell(cell); note = live ? live->note : 0; }
+			int px = x + (cell["row"].get<int>() - first) * std::max(1, column - 30) / std::max(1, last - first + 1);
+			if(note >= 1 && note <= 128)
+			{
+				int py = plotBottom - (note - low) * plotHeight / std::max(1, high - low);
+				dc.FillSolidRect(CRect(px, py, px + 7, py + 6), RGB(100, 180, 240));
+			} else dc.FillSolidRect(CRect(px, plotBottom - 5, px + 5, plotBottom), RGB(240, 165, 70));
+		}
+	}
+}
+
+BOOL ReviewPanel::OnCommand(WPARAM wParam, LPARAM lParam)
+{
+	const UINT id = LOWORD(wParam);
+	try
+	{
+		if(!service) return CWnd::OnCommand(wParam, lParam);
+		if(id == Release) service->ReleaseNow();
+		if((id == Approve || id == Decline) && service->pending && service->capability)
+		{
+			service->pending->Complete(service->capability->ResolveExpansion(id == Approve)); service->pending.reset();
+		}
+		if(id == Apply && service->capability) service->lastMessage = Text(service->capability->Apply().dump());
+		if(id == Reject && service->capability) { service->capability->Reject(); service->lastMessage = _T("Proposal rejected."); }
+		if(id == Evidence && HIWORD(wParam) == LBN_SELCHANGE && service->document && service->capability)
+		{
+			const int index = evidence.GetCurSel();
+			if(index >= 0 && service->review.contains("diff") && size_t(index) < service->review["diff"].size())
+			{
+				const auto &cell = service->review["diff"][index];
+				if(auto *view = PatternView(*service->document))
+				{
+					view->SetCurrentPattern(service->capability->Pattern());
+					PatternCursor cursor(cell["row"].get<ROWINDEX>(), cell["channel"].get<CHANNELINDEX>());
+					view->SetCursorPosition(cursor); view->SetCurSel(cursor); view->InvalidatePattern();
+				}
+			}
+			Invalidate(FALSE); return TRUE;
+		}
+		service->RefreshReview();
+	} catch(const std::exception &) { if(service) service->lastMessage = _T("Operation failed; document was not changed."); }
+	return CWnd::OnCommand(wParam, lParam);
+}
+
 BEGIN_MESSAGE_MAP(Panel, CWnd)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
+END_MESSAGE_MAP()
+
+BEGIN_MESSAGE_MAP(ReviewPanel, CWnd)
+	ON_WM_SIZE()
 	ON_WM_PAINT()
 END_MESSAGE_MAP()
-std::unique_ptr<Panel> panel;
+}
+
+// Issue 36: dedicated lower splitter view for the AI / MCP page. It hosts the
+// persistent ReviewPanel; the upper row keeps the connection/config Panel in
+// the regular tab client. The view only claims the review window while it is
+// the active host, so a stale view from another document can never hide or
+// reposition the UI of the document that currently owns the AI page.
+class CViewAI final : public CModScrollView
+{
+public:
+	CViewAI() = default;
+	DECLARE_SERIAL(CViewAI)
+
+	void OnInitialUpdate() override
+	{
+		CModScrollView::OnInitialUpdate();
+		CRect client;
+		GetClientRect(&client);
+		AttachReviewPanel(*this, client);
+	}
+	afx_msg void OnSize(UINT nType, int cx, int cy)
+	{
+		CWnd::OnSize(nType, cx, cy);
+		LayoutReviewPanel(*this, CRect(0, 0, cx, cy));
+	}
+	afx_msg void OnDestroy()
+	{
+		DetachReviewPanel(this);
+		CModScrollView::OnDestroy();
+	}
+	afx_msg LRESULT OnModMDIActivate(WPARAM, LPARAM)
+	{
+		CRect client;
+		GetClientRect(&client);
+		AttachReviewPanel(*this, client);
+		return 0;
+	}
+	afx_msg LRESULT OnModMDIDeactivate(WPARAM, LPARAM)
+	{
+		DetachReviewPanel(this);
+		return 0;
+	}
+	DECLARE_MESSAGE_MAP()
+};
+IMPLEMENT_SERIAL(CViewAI, CModScrollView, 0)
+
+BEGIN_MESSAGE_MAP(CViewAI, CModScrollView)
+	ON_WM_SIZE()
+	ON_WM_DESTROY()
+	ON_MESSAGE(WM_MOD_MDIACTIVATE, &CViewAI::OnModMDIActivate)
+	ON_MESSAGE(WM_MOD_MDIDEACTIVATE, &CViewAI::OnModMDIDeactivate)
+END_MESSAGE_MAP()
+
+CRuntimeClass *LowerViewRuntimeClass() { return RUNTIME_CLASS(CViewAI); }
+
+bool AttachReviewPanel(CWnd &host, const CRect &rect)
+{
+	if(!panel || !host.GetSafeHwnd()) return false;
+	// Only the AI lower view may claim the review window; other hosts are
+	// rejected so a stale page cannot hide or reposition it.
+	if(!host.IsKindOf(RUNTIME_CLASS(CViewAI))) return false;
+	// The review window is a child of the lower view and is therefore destroyed
+	// together with it on every page switch. All review state lives in Panel, so
+	// a fresh window for the view that now owns the AI page is enough.
+	if(!reviewPanel || !reviewPanel->GetSafeHwnd())
+		reviewPanel = std::make_unique<ReviewPanel>(host, *panel);
+	if(reviewPanel->GetParent() != &host)
+		reviewPanel->SetParent(&host);
+	reviewPanel->SetWindowPos(nullptr, rect.left, rect.top, std::max(1, rect.Width()), std::max(1, rect.Height()),
+		SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	reviewPanel->LayoutChildren();
+	return true;
+}
+void LayoutReviewPanel(CWnd &host, const CRect &rect)
+{
+	if(!reviewPanel || !reviewPanel->GetSafeHwnd()) return;
+	if(reviewPanel->GetParent() != &host) return;
+	reviewPanel->SetWindowPos(nullptr, rect.left, rect.top, std::max(1, rect.Width()), std::max(1, rect.Height()), SWP_NOZORDER | SWP_NOACTIVATE);
+	reviewPanel->LayoutChildren();
+}
+void DetachReviewPanel(CWnd *host)
+{
+	if(!reviewPanel) return;
+	if(!reviewPanel->GetSafeHwnd())
+	{
+		// The owning view was destroyed together with this child window; drop
+		// the detached wrapper so the next AI page recreates it.
+		reviewPanel.reset();
+		return;
+	}
+	if(host && reviewPanel->GetParent() != host) return;
+	if(host)
+	{
+		const HWND focus = ::GetFocus();
+		if(focus == reviewPanel->m_hWnd || ::IsChild(reviewPanel->m_hWnd, focus))
+			::SetFocus(host->GetSafeHwnd());
+	}
+	// Hide in place: the parent view stays alive while another document or tab
+	// is active, and dies with this window on a page switch.
+	reviewPanel->SetWindowPos(nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_HIDEWINDOW);
 }
 
 // Ticket 30 acceptance: no IPC read/write/wait/query may execute on the
@@ -906,7 +1107,11 @@ void AudioCallbackIpcCheck()
 			TestTrace("VIOLATION: realtime audio callback executed an AI IPC path");
 }
 
-void Start(CWnd &owner) { if(!panel) panel = std::make_unique<Panel>(owner); }
+void Start(CWnd &owner)
+{
+	if(!panel) panel = std::make_unique<Panel>(owner);
+	if(!reviewPanel) reviewPanel = std::make_unique<ReviewPanel>(owner, *panel);
+}
 #ifdef ENABLE_TESTS
 void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 {
@@ -936,10 +1141,13 @@ void IntegrationHost(CWnd &owner, CModDoc &doc, const wchar_t *report)
 	TestTrace("host: playback requested");
 }
 #endif
-void Stop() { panel.reset(); }
+void Stop() { reviewPanel.reset(); panel.reset(); }
 bool AttachPanel(CWnd &host, const CRect &rect)
 {
 	if(!panel || !panel->GetSafeHwnd() || !host.GetSafeHwnd()) return false;
+	// Only a regular tab host may claim the connection panel; the AI lower view
+	// hosts the review half instead.
+	if(!host.IsKindOf(RUNTIME_CLASS(CModControlView))) return false;
 	if(panel->GetParent() != &host)
 		panel->SetParent(&host);
 	panel->SetWindowPos(nullptr, rect.left, rect.top, std::max(1, rect.Width()), std::max(1, rect.Height()),
@@ -1004,6 +1212,9 @@ bool FilterInput(MSG &msg)
 {
 	if(!panel || !panel->capability || !panel->capability->Occupied()) return false;
 	if(msg.hwnd == panel->m_hWnd || ::IsChild(panel->m_hWnd, msg.hwnd)) return false;
+	// Review controls live in their own window; they must stay usable while the
+	// document is AI-occupied, so their input is never filtered.
+	if(reviewPanel && reviewPanel->GetSafeHwnd() && (msg.hwnd == reviewPanel->m_hWnd || ::IsChild(reviewPanel->m_hWnd, msg.hwnd))) return false;
 	auto *view = panel->document ? PatternView(*panel->document) : nullptr;
 	const bool onPattern = view && (msg.hwnd == view->m_hWnd || ::IsChild(view->m_hWnd, msg.hwnd));
 	if(msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN)

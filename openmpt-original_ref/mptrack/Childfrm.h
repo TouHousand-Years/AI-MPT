@@ -109,6 +109,9 @@ protected:
 	CommentsViewState m_ViewComments;
 	std::string m_currentViewClassName;
 	int m_dpi = 0;
+	// Upper splitter row height remembered while the AI page is selected; it is
+	// kept per document window and never written to a regular page's setting.
+	int m_aiSplitterHeight = 0;
 	bool m_maxWhenClosed = false;
 	bool m_initialActivation = true;
 
@@ -133,6 +136,8 @@ public:
 
 	void SetSplitterHeight(int x);
 	int GetSplitterHeight();
+	void SetAISplitterHeight(int x) { m_aiSplitterHeight = x; }
+	int GetAISplitterHeight() const { return m_aiSplitterHeight; }
 
 	void SaveAllViewStates();
 	std::string SerializeView();
