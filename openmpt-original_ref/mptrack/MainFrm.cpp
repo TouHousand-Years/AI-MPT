@@ -3272,6 +3272,7 @@ void CMainFrame::OnHelp()
 				case CModControlView::Page::Instruments: page = "::/Instruments.html"; break;
 				case CModControlView::Page::Comments: page = "::/Comments.html"; break;
 				case CModControlView::Page::AI: /* nothing */ break;
+				case CModControlView::Page::PianoRoll: /* no legacy help topic */ break;
 				case CModControlView::Page::Unknown: /* nothing */ break;
 				case CModControlView::Page::NumPages: /* nothing */ break;
 			}

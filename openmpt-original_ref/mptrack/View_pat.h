@@ -139,21 +139,6 @@ protected:
 	PatternCursor m_MenuCursor;           // Position at which context menu was opened.
 	PatternRect m_Selection;              // Upper-left / Lower-right corners of selection.
 
-	// PROTOTYPE (Issue 22): Throwaway synchronized Piano Roll state.
-	// The Pattern data, cursor, selection and undo history remain owned by CViewPattern.
-	friend class CPianoRollPrototypePane;
-	int m_pianoRollPrototypeWidth = 0;
-	int m_pianoRollPrototypeFirstRow = 0;
-	int m_pianoRollPrototypeMinPitch = -1;
-	double m_pianoRollPrototypeZoom = 1.0;
-	bool m_pianoRollPrototypeDragging = false;
-	ROWINDEX m_pianoRollPrototypeDragRow = 0;
-	CHANNELINDEX m_pianoRollPrototypeDragChannel = 0;
-	ModCommand::NOTE m_pianoRollPrototypeDragNote = NOTE_NONE;
-	ModCommand::NOTE m_pianoRollPrototypePreviewNote = NOTE_NONE;
-	CString m_pianoRollPrototypeStatus;
-	std::unique_ptr<CWnd> m_pianoRollPrototypePane;
-
 	// Drag&Drop
 	DragItem m_nDragItem;  // Currently dragged item
 	DragItem m_nDropItem;  // Currently hovered item during dragondrop
@@ -276,22 +261,6 @@ public:
 	void SetCurSel(const PatternCursor &point) { SetCurSel(point, point); };
 	void SetCurSel(PatternCursor beginSel, PatternCursor endSel);
 	void SetSelToCursor() { SetCurSel(m_Cursor); };
-
-	// PROTOTYPE (Issue 22): Native Pattern projection used to validate the
-	// synchronized editing seam before a production Piano Roll is designed.
-	CRect GetPianoRollPrototypeRect() const;
-	CRect GetPianoRollPrototypeGridRect() const;
-	CRect GetPianoRollPrototypeTimeRect() const;
-	int GetPianoRollPrototypeVisibleRows() const;
-	std::pair<int, int> GetPianoRollPrototypePitchRange() const;
-	void DrawPianoRollPrototype(CDC &dc);
-	bool HandlePianoRollPrototypeLButtonDown(UINT flags, CPoint point);
-	bool UpdatePianoRollPrototypeDrag(CPoint point);
-	bool FinishPianoRollPrototypeDrag(CPoint point);
-	bool TransposePianoRollPrototypeNote(int semitones);
-	void InvalidatePianoRollPrototype();
-	void AICancelPianoRollDrag() { m_pianoRollPrototypeDragging = false; if(GetCapture() == this) ReleaseCapture(); }
-	void UpdatePianoRollPrototypePaneLayout();
 
 	bool SetCurrentPattern(PATTERNINDEX pat, ROWINDEX row = ROWINDEX_INVALID);
 	ROWINDEX SetCurrentRow(ROWINDEX row, WrapMode wrapMode = WrapMode::IgnoreInvalidRow, bool updateHorizontalScrollbar = true);

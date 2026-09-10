@@ -2202,6 +2202,7 @@
     <ClCompile Include="..\..\mptrack\Ctrl_gen.cpp" />
     <ClCompile Include="..\..\mptrack\Ctrl_ins.cpp" />
     <ClCompile Include="..\..\mptrack\Ctrl_pat.cpp" />
+	<ClCompile Include="..\..\mptrack\Ctrl_pianoroll.cpp" />
     <ClCompile Include="..\..\mptrack\Ctrl_seq.cpp" />
     <ClCompile Include="..\..\mptrack\Ctrl_smp.cpp" />
     <ClCompile Include="..\..\mptrack\DefaultVstEditor.cpp" />
@@ -2251,6 +2252,7 @@
     <ClCompile Include="..\..\mptrack\PatternFindReplaceDlg.cpp" />
     <ClCompile Include="..\..\mptrack\PatternFont.cpp" />
     <ClCompile Include="..\..\mptrack\PatternGotoDialog.cpp" />
+	<ClCompile Include="..\..\mptrack\PianoRollPattern.cpp" />
     <ClCompile Include="..\..\mptrack\PlugNotFoundDlg.cpp" />
     <ClCompile Include="..\..\mptrack\PluginComboBox.cpp" />
     <ClCompile Include="..\..\mptrack\ProgressDialog.cpp" />
@@ -2276,6 +2278,7 @@
     <ClCompile Include="..\..\mptrack\View_gen.cpp" />
     <ClCompile Include="..\..\mptrack\View_ins.cpp" />
     <ClCompile Include="..\..\mptrack\View_pat.cpp" />
+	<ClCompile Include="..\..\mptrack\View_pianoroll.cpp" />
     <ClCompile Include="..\..\mptrack\View_smp.cpp" />
     <ClCompile Include="..\..\mptrack\View_tre.cpp" />
     <ClCompile Include="..\..\mptrack\VstPresets.cpp" />
@@ -2451,6 +2454,7 @@
     <ClCompile Include="..\..\mptrack\AIService.cpp" />
     <ClCompile Include="..\..\mptrack\AIPattern.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_ai_pattern.cpp" />
+    <ClCompile Include="..\..\test\mpt_tests_pianoroll.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_base.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_binary.cpp" />
     <ClCompile Include="..\..\test\mpt_tests_crc.cpp" />

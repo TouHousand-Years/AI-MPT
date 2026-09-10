@@ -739,6 +739,7 @@ public:
 	Setting<LONG> glTreeWindowWidth;
 	Setting<LONG> glGeneralWindowHeight;
 	Setting<LONG> glPatternWindowHeight;
+	Setting<LONG> glPianoRollWindowHeight;
 	Setting<LONG> glSampleWindowHeight;
 	Setting<LONG> glInstrumentWindowHeight;
 	Setting<LONG> glCommentsWindowHeight;

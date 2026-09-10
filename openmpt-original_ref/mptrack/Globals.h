@@ -125,6 +125,7 @@ public:
 		Comments,
 		// Appended after the serialized values so existing settings keep their meaning.
 		AI,
+		PianoRoll,
 		NumPages
 	};
 

@@ -14,6 +14,7 @@
 #include "ChannelManagerDlg.h"
 #include "Ctrl_ins.h"
 #include "Ctrl_pat.h"
+#include "Ctrl_pianoroll.h"
 #include "Ctrl_smp.h"
 #include "Globals.h"
 #include "HighDPISupport.h"
@@ -25,6 +26,7 @@
 #include "View_gen.h"
 #include "View_ins.h"
 #include "View_pat.h"
+#include "View_pianoroll.h"
 #include "View_smp.h"
 #include "WindowMessages.h"
 #include "../common/FileReader.h"
@@ -316,6 +318,8 @@ void CChildFrame::SavePosition(bool force)
 					TrackerSettings::Instance().glGeneralWindowHeight = l;
 				else if(CViewPattern::classCViewPattern.m_lpszClassName == m_currentViewClassName)
 					TrackerSettings::Instance().glPatternWindowHeight = l;
+				else if(CViewPianoRoll::classCViewPianoRoll.m_lpszClassName == m_currentViewClassName)
+					TrackerSettings::Instance().glPianoRollWindowHeight = l;
 				else if(CViewSample::classCViewSample.m_lpszClassName == m_currentViewClassName)
 					TrackerSettings::Instance().glSampleWindowHeight = l;
 				else if(CViewInstrument::classCViewInstrument.m_lpszClassName == m_currentViewClassName)
@@ -431,6 +435,8 @@ void CChildFrame::SaveAllViewStates()
 		ptr = &m_ViewGeneral;
 	else if(CViewComments::classCViewComments.m_lpszClassName == m_currentViewClassName)
 		ptr = &m_ViewComments;
+	else if(CViewPianoRoll::classCViewPianoRoll.m_lpszClassName == m_currentViewClassName)
+		ptr = &m_ViewPianoRoll;
 	::SendMessage(m_hWndView, WM_MOD_VIEWMSG, VIEWMSG_SAVESTATE, reinterpret_cast<LPARAM>(ptr));
 }
 
@@ -441,7 +447,7 @@ std::string CChildFrame::SerializeView()
 
 	std::ostringstream f(std::ios::out | std::ios::binary);
 	// Version
-	mpt::IO::WriteVarInt(f, 1u);
+	mpt::IO::WriteVarInt(f, 2u);
 	// Current page
 	mpt::IO::WriteVarInt(f, static_cast<uint8>(GetModControlView()->GetActivePage()));
 
@@ -454,6 +460,7 @@ std::string CChildFrame::SerializeView()
 	Serialize(f, CModControlView::Page::Patterns, m_ViewPatterns.Serialize());
 	Serialize(f, CModControlView::Page::Samples, m_ViewSamples.Serialize());
 	Serialize(f, CModControlView::Page::Instruments, m_ViewInstruments.Serialize());
+	Serialize(f, CModControlView::Page::PianoRoll, m_ViewPianoRoll.Serialize());
 
 	return std::move(f).str();
 }
@@ -462,7 +469,7 @@ std::string CChildFrame::SerializeView()
 void CChildFrame::DeserializeView(FileReader &file)
 {
 	uint32 version, page;
-	if(!file.ReadVarInt(version) || version > 1)
+	if(!file.ReadVarInt(version) || version > 2)
 		return;
 	if(!file.ReadVarInt(page) || page >= static_cast<uint32>(CModControlView::Page::NumPages))
 		return;
@@ -494,6 +501,9 @@ void CChildFrame::DeserializeView(FileReader &file)
 	case CModControlView::Page::AI:
 		pageDlg = AI::PanelPageId;
 		break;
+	case CModControlView::Page::PianoRoll:
+		pageDlg = PianoRoll::PanelPageId;
+		break;
 	case CModControlView::Page::Unknown:
 	case CModControlView::Page::NumPages:
 		break;
@@ -517,6 +527,7 @@ void CChildFrame::DeserializeView(FileReader &file)
 		case CModControlView::Page::Instruments: m_ViewInstruments.Deserialize(chunk); break;
 		case CModControlView::Page::Comments:    m_ViewComments.Deserialize(chunk); break;
 		case CModControlView::Page::AI:          /* no view state */ break;
+		case CModControlView::Page::PianoRoll:   m_ViewPianoRoll.Deserialize(chunk); break;
 		case CModControlView::Page::Unknown:
 		case CModControlView::Page::NumPages:
 			break;
@@ -580,6 +591,53 @@ std::string InstrumentViewState::Serialize() const
 void InstrumentViewState::Deserialize(FileReader &f)
 {
 	f.ReadVarInt(initialInstrument);
+}
+
+
+std::string PianoRollViewState::Serialize() const
+{
+	std::ostringstream f(std::ios::out | std::ios::binary);
+	mpt::IO::WriteVarInt(f, nPattern);
+	mpt::IO::WriteVarInt(f, firstRow);
+	mpt::IO::WriteVarInt(f, activeChannel);
+	mpt::IO::WriteVarInt(f, static_cast<uint32>(std::max(0, topPitch)));
+	mpt::IO::WriteVarInt(f, static_cast<uint32>(std::max(0, rowZoom)));
+	mpt::IO::WriteVarInt(f, static_cast<uint32>(std::max(0, keyZoom)));
+	mpt::IO::WriteVarInt(f, instrument);
+	mpt::IO::WriteVarInt(f, snapRows);
+	mpt::IO::WriteVarInt(f, (snap ? 1u : 0u) | (showAllChannels ? 2u : 0u) | (followSong ? 4u : 0u) | (initialized ? 8u : 0u));
+	mpt::IO::WriteVarInt(f, selection.size());
+	for(const auto &note : selection)
+	{
+		mpt::IO::WriteVarInt(f, note.row);
+		mpt::IO::WriteVarInt(f, note.channel);
+	}
+	return std::move(f).str();
+}
+
+
+void PianoRollViewState::Deserialize(FileReader &f)
+{
+	uint32 flags = 0, count = 0, storedTopPitch = 0, storedRowZoom = 0, storedKeyZoom = 0;
+	if(!f.ReadVarInt(nPattern) || !f.ReadVarInt(firstRow) || !f.ReadVarInt(activeChannel)
+		|| !f.ReadVarInt(storedTopPitch) || !f.ReadVarInt(storedRowZoom) || !f.ReadVarInt(storedKeyZoom)
+		|| !f.ReadVarInt(instrument) || !f.ReadVarInt(snapRows) || !f.ReadVarInt(flags) || !f.ReadVarInt(count))
+		return;
+	topPitch = static_cast<int>(storedTopPitch);
+	rowZoom = static_cast<int>(storedRowZoom);
+	keyZoom = static_cast<int>(storedKeyZoom);
+	snap = (flags & 1) != 0;
+	showAllChannels = (flags & 2) != 0;
+	followSong = (flags & 4) != 0;
+	initialized = (flags & 8) != 0;
+	selection.clear();
+	selection.reserve(std::min<uint32>(count, 4096));
+	for(uint32 index = 0; index < count && f.CanRead(2); ++index)
+	{
+		Selection note;
+		if(!f.ReadVarInt(note.row) || !f.ReadVarInt(note.channel)) break;
+		selection.push_back(note);
+	}
 }
 
 

@@ -1247,8 +1247,7 @@ bool FilterInput(MSG &msg)
 		{
 			CPoint point(GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam));
 			::MapWindowPoints(msg.hwnd, view->m_hWnd, &point, 1);
-			if(view->GetPianoRollPrototypeRect().PtInRect(point)) { view->HandlePianoRollPrototypeLButtonDown(0, point); view->AICancelPianoRollDrag(); panel->selecting = false; panel->keyboardSelecting = false; panel->selectionAnchor = PatternCursor(view->GetCurrentRow(), view->GetCurrentChannel()); }
-			else { auto cursor = view->GetPositionFromPoint(point); cursor.Sanitize(panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows(), panel->document->GetSoundFile().GetNumChannels()); view->SetCursorPosition(cursor); view->SetCurSel(cursor); panel->selectionAnchor = cursor; panel->selecting = true; panel->keyboardSelecting = false; }
+			auto cursor = view->GetPositionFromPoint(point); cursor.Sanitize(panel->document->GetSoundFile().Patterns[view->GetCurrentPattern()].GetNumRows(), panel->document->GetSoundFile().GetNumChannels()); view->SetCursorPosition(cursor); view->SetCurSel(cursor); panel->selectionAnchor = cursor; panel->selecting = true; panel->keyboardSelecting = false;
 		}
 		if(onPattern && msg.message == WM_MOUSEMOVE && panel->selecting && (msg.wParam & MK_LBUTTON))
 		{

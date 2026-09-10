@@ -1633,6 +1633,7 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 		const wchar_t *report = _wgetenv(L"OPENMPT_AI_TEST_REPORT");
 		try
 		{
+			Test::PianoRollPatternTests(fixture);
 			Test::AIPatternTests(fixture);
 			if(report) std::ofstream(report) << "PASS\n";
 		} catch(const std::exception &error)

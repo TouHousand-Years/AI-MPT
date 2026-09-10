@@ -2051,6 +2051,9 @@
     <ClCompile Include="..\..\mptrack\Ctrl_pat.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
+	<ClCompile Include="..\..\mptrack\Ctrl_pianoroll.cpp">
+	  <Filter>mptrack</Filter>
+	</ClCompile>
     <ClCompile Include="..\..\mptrack\Ctrl_seq.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
@@ -2198,6 +2201,9 @@
     <ClCompile Include="..\..\mptrack\PatternGotoDialog.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
+	<ClCompile Include="..\..\mptrack\PianoRollPattern.cpp">
+	  <Filter>mptrack</Filter>
+	</ClCompile>
     <ClCompile Include="..\..\mptrack\PlugNotFoundDlg.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
@@ -2273,6 +2279,9 @@
     <ClCompile Include="..\..\mptrack\View_pat.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
+	<ClCompile Include="..\..\mptrack\View_pianoroll.cpp">
+	  <Filter>mptrack</Filter>
+	</ClCompile>
     <ClCompile Include="..\..\mptrack\View_smp.cpp">
       <Filter>mptrack</Filter>
     </ClCompile>
@@ -2790,6 +2799,9 @@
       <Filter>test</Filter>
     </ClCompile>
     <ClCompile Include="..\..\test\mpt_tests_base.cpp">
+      <Filter>test</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\test\mpt_tests_pianoroll.cpp">
       <Filter>test</Filter>
     </ClCompile>
     <ClCompile Include="..\..\test\mpt_tests_binary.cpp">

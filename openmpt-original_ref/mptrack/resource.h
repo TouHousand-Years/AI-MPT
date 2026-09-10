@@ -19,6 +19,7 @@
 #define IDD_CONTROL_PATTERNS            116
 #define IDD_CONTROL_SAMPLES             117
 #define IDD_CONTROL_INSTRUMENTS         118
+#define IDD_CONTROL_PIANOROLL           509
 #define IDD_MODDOC_MODTYPE              119
 #define IDD_REMOVECHANNELS              120
 #define IDD_EDIT_FIND                   121
@@ -92,6 +93,17 @@
 #define IDD_MIDI_IO_PLUGIN              504
 #define IDD_CONTROL_GRAPH               507
 #define IDD_QUICKSTART                  508
+#define IDC_PIANOROLL_PATTERN           5600
+#define IDC_PIANOROLL_CHANNEL           5601
+#define IDC_PIANOROLL_INSTRUMENT        5602
+#define IDC_PIANOROLL_SNAP              5603
+#define IDC_PIANOROLL_SNAPROWS          5604
+#define IDC_PIANOROLL_CHANNELFILTER     5605
+#define IDC_PIANOROLL_FOLLOWSONG        5606
+#define IDC_PIANOROLL_UNDO              5607
+#define IDC_PIANOROLL_REDO              5608
+#define IDC_PIANOROLL_PLAY              5609
+#define IDC_PIANOROLL_STOP              5610
 #define IDD_SCALE_ENV_POINTS            510
 #define IDD_TUNING                      511
 #define IDD_UPDATE                      512

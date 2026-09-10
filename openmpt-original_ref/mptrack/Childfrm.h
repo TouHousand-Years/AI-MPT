@@ -14,6 +14,8 @@
 
 #include "PatternCursor.h"
 
+#include "../soundlib/modcommand.h"
+
 #include "../common/FileReaderFwd.h"
 #include "../tracklib/Types.h"
 
@@ -84,6 +86,31 @@ struct CommentsViewState
 	void Deserialize(FileReader &) {}
 };
 
+// Unlike the Tracker Pattern state, this state belongs only to the Piano Roll
+// page.  It intentionally carries no Order semantics or persistent note IDs.
+struct PianoRollViewState
+{
+	struct Selection
+	{
+		ROWINDEX row = 0;
+		CHANNELINDEX channel = 0;
+	};
+
+	PATTERNINDEX nPattern = 0;
+	ROWINDEX firstRow = 0;
+	CHANNELINDEX activeChannel = 0;
+	int topPitch = NOTE_MAX;
+	int rowZoom = 18;
+	int keyZoom = 18;
+	ModCommand::INSTR instrument = 0;
+	ROWINDEX snapRows = 1;
+	bool snap = true, showAllChannels = true, followSong = true, initialized = false;
+	std::vector<Selection> selection;
+
+	std::string Serialize() const;
+	void Deserialize(FileReader &f);
+};
+
 
 
 class CChildFrame: public CMDIChildWnd
@@ -107,6 +134,7 @@ protected:
 	SampleViewState m_ViewSamples;
 	InstrumentViewState m_ViewInstruments;
 	CommentsViewState m_ViewComments;
+	PianoRollViewState m_ViewPianoRoll;
 	std::string m_currentViewClassName;
 	int m_dpi = 0;
 	// Upper splitter row height remembered while the AI page is selected; it is
@@ -131,6 +159,7 @@ public:
 	SampleViewState &GetSampleViewState() { return m_ViewSamples; }
 	InstrumentViewState &GetInstrumentViewState() { return m_ViewInstruments; }
 	CommentsViewState &GetCommentViewState() { return m_ViewComments; }
+	PianoRollViewState &GetPianoRollViewState() { return m_ViewPianoRoll; }
 
 	bool IsPatternView() const;
 

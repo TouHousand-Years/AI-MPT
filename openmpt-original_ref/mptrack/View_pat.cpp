@@ -142,251 +142,6 @@ END_MESSAGE_MAP()
 static_assert(ModCommand::maxColumnValue <= 999, "Command range for ID_CHANGE_PCNOTE_PARAM is designed for 999");
 
 
-// PROTOTYPE (Issue 22): A dedicated child window keeps the Piano Roll out of
-// the Tracker's paint and scroll surface. It is intentionally local to the
-// Pattern view and can be discarded when the production editor seam is built.
-class CPianoRollPrototypePane final : public CWnd
-{
-public:
-	explicit CPianoRollPrototypePane(CViewPattern &owner)
-		: m_owner(owner) {}
-
-	bool Create()
-	{
-		const CString windowClass = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(nullptr, IDC_ARROW), nullptr, nullptr);
-		if(!CreateEx(0, windowClass, _T("Piano Roll Prototype"), WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN,
-			CRect{}, &m_owner, 0))
-			return false;
-		return m_horizontal.Create(WS_CHILD | WS_VISIBLE | SBS_HORZ, CRect{}, this, 1)
-			&& m_vertical.Create(WS_CHILD | WS_VISIBLE | SBS_VERT, CRect{}, this, 2);
-	}
-
-protected:
-	CViewPattern &m_owner;
-	CScrollBar m_horizontal, m_vertical;
-	bool m_resizing = false;
-	int m_resizeOffset = 0;
-	int m_wheelRemainder = 0;
-	UINT m_wheelModifiers = 0;
-
-	void UpdateScrollbars()
-	{
-		if(!m_horizontal.GetSafeHwnd() || !m_vertical.GetSafeHwnd())
-			return;
-		CRect grid = m_owner.GetPianoRollPrototypeGridRect();
-		const CRect pane = m_owner.GetPianoRollPrototypeRect();
-		grid.OffsetRect(-pane.left, -pane.top);
-		m_horizontal.MoveWindow(grid.left, grid.bottom + 2, grid.Width(), 16, FALSE);
-		m_vertical.MoveWindow(grid.right + 2, grid.top, 16, grid.Height(), FALSE);
-		const CSoundFile *sndFile = m_owner.GetSoundFile();
-		const int rows = sndFile && sndFile->Patterns.IsValidPat(m_owner.m_nPattern) ? sndFile->Patterns[m_owner.m_nPattern].GetNumRows() : 1;
-		const int visible = m_owner.GetPianoRollPrototypeVisibleRows();
-		m_owner.m_pianoRollPrototypeFirstRow = Clamp(m_owner.m_pianoRollPrototypeFirstRow, 0, std::max(0, rows - visible));
-		SCROLLINFO info{};
-		info.cbSize = sizeof(info);
-		info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-		info.nMax = rows - 1;
-		info.nPage = visible;
-		info.nPos = m_owner.m_pianoRollPrototypeFirstRow;
-		m_horizontal.SetScrollInfo(&info);
-		const auto [low, high] = m_owner.GetPianoRollPrototypePitchRange();
-		const int minNote = sndFile ? sndFile->GetModSpecifications().noteMin : NOTE_MIN;
-		const int maxNote = sndFile ? sndFile->GetModSpecifications().noteMax : NOTE_MAX;
-		info.nMax = maxNote - minNote;
-		info.nPage = high - low + 1;
-		info.nPos = maxNote - high;
-		m_vertical.SetScrollInfo(&info);
-		// Resizing with MoveWindow(..., FALSE) does not repaint newly exposed controls.
-		m_horizontal.Invalidate(FALSE);
-		m_vertical.Invalidate(FALSE);
-	}
-
-	void Scroll(CScrollBar &bar, UINT code)
-	{
-		m_owner.AICancelPianoRollDrag();
-		UpdateScrollbars();
-		SCROLLINFO info{};
-		info.cbSize = sizeof(info);
-		bar.GetScrollInfo(&info, SIF_ALL);
-		int pos = info.nPos;
-		switch(code)
-		{
-		case SB_LINEUP: pos--; break;
-		case SB_LINEDOWN: pos++; break;
-		case SB_PAGEUP: pos -= info.nPage; break;
-		case SB_PAGEDOWN: pos += info.nPage; break;
-		case SB_THUMBTRACK:
-		case SB_THUMBPOSITION: pos = info.nTrackPos; break;
-		case SB_TOP: pos = info.nMin; break;
-		case SB_BOTTOM: pos = info.nMax; break;
-		default: return;
-		}
-		pos = Clamp(pos, info.nMin, std::max(info.nMin, info.nMax - static_cast<int>(info.nPage) + 1));
-		if(&bar == &m_horizontal)
-			m_owner.m_pianoRollPrototypeFirstRow = pos;
-		else
-			m_owner.m_pianoRollPrototypeMinPitch = m_owner.GetPianoRollPrototypePitchRange().first + info.nPos - pos;
-		Invalidate(FALSE);
-	}
-
-	afx_msg void OnHScroll(UINT code, UINT, CScrollBar *) { Scroll(m_horizontal, code); }
-	afx_msg void OnVScroll(UINT code, UINT, CScrollBar *) { Scroll(m_vertical, code); }
-
-	afx_msg BOOL OnMouseWheel(UINT flags, short delta, CPoint point)
-	{
-		if(m_resizing || m_owner.m_pianoRollPrototypeDragging)
-			return TRUE;
-		const UINT modifiers = flags & (MK_CONTROL | MK_SHIFT);
-		if(modifiers != m_wheelModifiers)
-			m_wheelRemainder = 0;
-		m_wheelModifiers = modifiers;
-		m_wheelRemainder += delta;
-		const int steps = m_wheelRemainder / WHEEL_DELTA;
-		m_wheelRemainder %= WHEEL_DELTA;
-		if(!steps)
-			return TRUE;
-		UpdateScrollbars();
-		if(flags & MK_CONTROL)
-		{
-			m_owner.ScreenToClient(&point);
-			const CRect grid = m_owner.GetPianoRollPrototypeGridRect();
-			const double anchor = Clamp(static_cast<double>(point.x - grid.left) / std::max(1, grid.Width()), 0.0, 1.0);
-			const double row = m_owner.m_pianoRollPrototypeFirstRow + anchor * m_owner.GetPianoRollPrototypeVisibleRows();
-			m_owner.m_pianoRollPrototypeZoom = Clamp(m_owner.m_pianoRollPrototypeZoom * std::pow(1.25, steps), 1.0, 256.0);
-			m_owner.m_pianoRollPrototypeFirstRow = static_cast<int>(std::round(row - anchor * m_owner.GetPianoRollPrototypeVisibleRows()));
-		} else if(flags & MK_SHIFT)
-		{
-			m_owner.m_pianoRollPrototypeFirstRow -= steps * 4;
-		} else
-		{
-			const CSoundFile *sndFile = m_owner.GetSoundFile();
-			const int minNote = sndFile ? sndFile->GetModSpecifications().noteMin : NOTE_MIN;
-			const int maxNote = sndFile ? sndFile->GetModSpecifications().noteMax : NOTE_MAX;
-			const auto [low, high] = m_owner.GetPianoRollPrototypePitchRange();
-			m_owner.m_pianoRollPrototypeMinPitch = Clamp(low + steps * 3, minNote, std::max(minNote, maxNote - (high - low)));
-		}
-		UpdateScrollbars();
-		Invalidate(FALSE);
-		return TRUE;
-	}
-
-	afx_msg BOOL OnSetCursor(CWnd *wnd, UINT hitTest, UINT message)
-	{
-		CPoint point;
-		GetCursorPos(&point);
-		ScreenToClient(&point);
-		if(m_resizing || (hitTest == HTCLIENT && point.x >= 0 && point.x < 7))
-		{
-			::SetCursor(::LoadCursor(nullptr, IDC_SIZEWE));
-			return TRUE;
-		}
-		return CWnd::OnSetCursor(wnd, hitTest, message);
-	}
-
-	afx_msg void OnMouseMove(UINT, CPoint point)
-	{
-		if(!m_resizing)
-			return;
-		CRect client;
-		m_owner.GetClientRect(&client);
-		m_owner.m_pianoRollPrototypeWidth = Clamp(client.right - ToOwnerPoint(point).x + m_resizeOffset, 420, std::max(420, client.Width() - 360));
-		m_owner.UpdateScrollSize();
-		m_owner.UpdatePianoRollPrototypePaneLayout();
-		m_owner.Invalidate(FALSE);
-	}
-
-	afx_msg void OnLButtonUp(UINT flags, CPoint point)
-	{
-		if(m_resizing)
-		{
-			OnMouseMove(flags, point);
-			m_resizing = false;
-			if(GetCapture() == this) ReleaseCapture();
-		}
-	}
-
-	afx_msg void OnCaptureChanged(CWnd *) { m_resizing = false; }
-
-
-	afx_msg BOOL OnEraseBkgnd(CDC *) { return TRUE; }
-
-	afx_msg void OnPaint()
-	{
-		UpdateScrollbars();
-		CPaintDC paintDC(this);
-		CRect client;
-		GetClientRect(&client);
-		if(client.IsRectEmpty())
-			return;
-
-		// Paint the complete pane into a private bitmap and present it with one
-		// BitBlt. Playback notifications may arrive many times per second, so
-		// drawing GDI primitives directly to the screen visibly flashed.
-		CDC bufferDC;
-		CBitmap bufferBitmap;
-		bufferDC.CreateCompatibleDC(&paintDC);
-		bufferBitmap.CreateCompatibleBitmap(&paintDC, client.Width(), client.Height());
-		CBitmap *oldBitmap = bufferDC.SelectObject(&bufferBitmap);
-		const CRect pane = m_owner.GetPianoRollPrototypeRect();
-		const CPoint oldOrigin = bufferDC.SetViewportOrg(-pane.left, -pane.top);
-		m_owner.DrawPianoRollPrototype(bufferDC);
-		bufferDC.SetViewportOrg(oldOrigin);
-		paintDC.BitBlt(0, 0, client.Width(), client.Height(), &bufferDC, 0, 0, SRCCOPY);
-		bufferDC.SelectObject(oldBitmap);
-		m_horizontal.RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
-		m_vertical.RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
-	}
-
-	CPoint ToOwnerPoint(CPoint point)
-	{
-		ClientToScreen(&point);
-		m_owner.ScreenToClient(&point);
-		return point;
-	}
-
-	afx_msg void OnLButtonDown(UINT flags, CPoint point)
-	{
-		if(point.x < 7)
-		{
-			m_owner.AICancelPianoRollDrag();
-			m_resizing = true;
-			m_resizeOffset = point.x;
-			SetCapture();
-			return;
-		}
-		if(point.y >= 55 && point.y < 83 && ((point.x >= 326 && point.x < 360) || (point.x >= 366 && point.x < 400)))
-		{
-			CPoint anchor = m_owner.GetPianoRollPrototypeGridRect().CenterPoint();
-			m_owner.ClientToScreen(&anchor);
-			OnMouseWheel(MK_CONTROL, point.x < 360 ? -WHEEL_DELTA : WHEEL_DELTA, anchor);
-			return;
-		}
-		m_owner.HandlePianoRollPrototypeLButtonDown(flags, ToOwnerPoint(point));
-	}
-
-	afx_msg void OnLButtonDblClk(UINT flags, CPoint point)
-	{
-		const CPoint ownerPoint = ToOwnerPoint(point);
-		m_owner.SendMessage(WM_LBUTTONDBLCLK, flags, MAKELPARAM(ownerPoint.x, ownerPoint.y));
-	}
-
-	DECLARE_MESSAGE_MAP()
-};
-
-
-BEGIN_MESSAGE_MAP(CPianoRollPrototypePane, CWnd)
-	ON_WM_HSCROLL()
-	ON_WM_VSCROLL()
-	ON_WM_MOUSEWHEEL()
-	ON_WM_SETCURSOR()
-	ON_WM_MOUSEMOVE()
-	ON_WM_LBUTTONUP()
-	ON_WM_CAPTURECHANGED()
-	ON_WM_ERASEBKGND()
-	ON_WM_PAINT()
-	ON_WM_LBUTTONDOWN()
-	ON_WM_LBUTTONDBLCLK()
-END_MESSAGE_MAP()
 
 const CSoundFile *CViewPattern::GetSoundFile() const { return (GetDocument() != nullptr) ? &GetDocument()->GetSoundFile() : nullptr; };
 CSoundFile *CViewPattern::GetSoundFile() { return (GetDocument() != nullptr) ? &GetDocument()->GetSoundFile() : nullptr; };
@@ -402,7 +157,6 @@ CViewPattern::CViewPattern()
 	m_Dib.Init(CMainFrame::bmpNotes);
 	UpdateColors();
 	m_octaveKeyMemory.fill(NOTE_NONE);
-	m_pianoRollPrototypeStatus = _T("Select a native note, then drag it or use -1 / +1.");
 }
 
 
@@ -418,10 +172,6 @@ CViewPattern::~CViewPattern()
 void CViewPattern::OnInitialUpdate()
 {
 	CModScrollView::OnInitialUpdate();
-	ModifyStyle(0, WS_CLIPCHILDREN);
-	auto pianoRollPane = std::make_unique<CPianoRollPrototypePane>(*this);
-	if(pianoRollPane->Create())
-		m_pianoRollPrototypePane = std::move(pianoRollPane);
 	EnableToolTips();
 	m_chnState.assign(GetDocument()->GetNumChannels(), {});
 	m_splitActiveNoteChannel.fill(NOTE_CHANNEL_MAP_INVALID);
@@ -448,7 +198,6 @@ void CViewPattern::OnInitialUpdate()
 	m_prevChordNote = NOTE_NONE;
 
 	m_visibleColumns.set();
-	UpdatePianoRollPrototypePaneLayout();
 	CModDoc *modDoc = GetDocument();
 	if(modDoc->GetSoundFile().m_SongFlags[SONG_FORMAT_NO_VOLCOL] && TrackerSettings::Instance().autoHideVolumeColumnForMOD)
 		m_visibleColumns.reset(PatternCursor::volumeColumn);
@@ -1033,8 +782,6 @@ void CViewPattern::OnDestroy()
 		delete m_pEditWnd;
 		m_pEditWnd = NULL;
 	}
-	if(m_pianoRollPrototypePane && m_pianoRollPrototypePane->GetSafeHwnd())
-		m_pianoRollPrototypePane->DestroyWindow();
 
 	CModScrollView::OnDestroy();
 }
@@ -1393,8 +1140,6 @@ void CViewPattern::OnLButtonDown(UINT nFlags, CPoint point)
 	const auto *modDoc = GetDocument();
 	if(modDoc == nullptr)
 		return;
-	if(HandlePianoRollPrototypeLButtonDown(nFlags, point))
-		return;
 	const auto &sndFile = modDoc->GetSoundFile();
 
 	SetFocus();
@@ -1487,13 +1232,6 @@ void CViewPattern::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CViewPattern::OnLButtonDblClk(UINT uFlags, CPoint point)
 {
-	if(GetPianoRollPrototypeRect().PtInRect(point))
-	{
-		HandlePianoRollPrototypeLButtonDown(uFlags, point);
-		if(GetCursorCommand().IsNote())
-			PreviewNote(GetCurrentRow(), GetCurrentChannel());
-		return;
-	}
 	PatternCursor cursor = GetPositionFromPoint(point);
 	if(cursor == m_Cursor && point.y >= m_szHeader.cy)
 	{
@@ -1516,10 +1254,6 @@ void CViewPattern::OnLButtonDblClk(UINT uFlags, CPoint point)
 
 void CViewPattern::OnLButtonUp(UINT nFlags, CPoint point)
 {
-	if(FinishPianoRollPrototypeDrag(point))
-		return;
-	if(GetPianoRollPrototypeRect().PtInRect(point))
-		return;
 	CModDoc *modDoc = GetDocument();
 	if(modDoc == nullptr)
 		return;
@@ -1858,10 +1592,6 @@ void CViewPattern::OnRButtonUp(UINT flags, CPoint pt)
 // cppcheck-suppress duplInheritedMember
 BOOL CViewPattern::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
-	CPoint clientPoint = pt;
-	ScreenToClient(&clientPoint);
-	if(m_pianoRollPrototypePane && GetPianoRollPrototypeRect().PtInRect(clientPoint))
-		return static_cast<BOOL>(m_pianoRollPrototypePane->SendMessage(WM_MOUSEWHEEL, MAKEWPARAM(nFlags, zDelta), MAKELPARAM(pt.x, pt.y)));
 	if(nFlags & MK_CONTROL)
 	{
 		// Ctrl + mouse wheel: Increment / decrement values
@@ -1895,10 +1625,6 @@ void CViewPattern::OnXButtonUp(UINT nFlags, UINT nButton, CPoint point)
 
 void CViewPattern::OnMouseMove(UINT nFlags, CPoint point)
 {
-	if(UpdatePianoRollPrototypeDrag(point))
-		return;
-	if(GetPianoRollPrototypeRect().PtInRect(point))
-		return;
 	CModScrollView::OnMouseMove(nFlags, point);
 
 	const bool isDraggingRecordGroup = IsDraggingRecordGroup();
@@ -3985,26 +3711,10 @@ LRESULT CViewPattern::OnPlayerNotify(Notification *pnotify)
 	}
 
 	UpdateIndicator(false);
-	InvalidatePianoRollPrototype();
 
 	return 0;
 }
 
-
-void CViewPattern::UpdatePianoRollPrototypePaneLayout()
-{
-	if(!m_pianoRollPrototypePane || !m_pianoRollPrototypePane->GetSafeHwnd())
-		return;
-	const CRect pane = GetPianoRollPrototypeRect();
-	if(pane.IsRectEmpty())
-	{
-		m_pianoRollPrototypePane->ShowWindow(SW_HIDE);
-		return;
-	}
-	m_pianoRollPrototypePane->MoveWindow(pane, FALSE);
-	m_pianoRollPrototypePane->ShowWindow(SW_SHOWNA);
-	m_pianoRollPrototypePane->Invalidate(FALSE);
-}
 
 CHANNELINDEX CViewPattern::GetRecordChannelForPCEvent(PLUGINDEX plugSlot, PlugParamIndex paramIndex) const
 {

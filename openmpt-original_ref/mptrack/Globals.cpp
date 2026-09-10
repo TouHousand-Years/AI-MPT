@@ -11,6 +11,8 @@
 
 #include "stdafx.h"
 #include "AIService.h"
+#include "Ctrl_pianoroll.h"
+#include "PianoRoll.h"
 #include "Globals.h"
 #include "Childfrm.h"
 #include "Ctrl_com.h"
@@ -360,19 +362,25 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		case IDD_CONTROL_SAMPLES: page = Page::Samples; break;
 		case IDD_CONTROL_INSTRUMENTS: page = Page::Instruments; break;
 		case AI::PanelPageId: page = Page::AI; break;
+		case PianoRoll::PanelPageId: page = Page::PianoRoll; break;
 		default: return false;
 		}
 	}
 
+	// Tab item data is a stable page ID, whereas CDialog::Create needs a
+	// resource-template ID. The two happen to be identical for the historical
+	// pages, but must stay separate for the independently versioned Piano Roll.
 	UINT nID = 0;
+	UINT tabID = 0;
 	switch(page)
 	{
-	case Page::Comments: nID = IDD_CONTROL_COMMENTS; break;
-	case Page::Globals: nID = IDD_CONTROL_GLOBALS; break;
-	case Page::Patterns: nID = IDD_CONTROL_PATTERNS; break;
-	case Page::Samples: nID = IDD_CONTROL_SAMPLES; break;
-	case Page::Instruments: nID = IDD_CONTROL_INSTRUMENTS; break;
-	case Page::AI: nID = AI::PanelPageId; break;
+	case Page::Comments: nID = tabID = IDD_CONTROL_COMMENTS; break;
+	case Page::Globals: nID = tabID = IDD_CONTROL_GLOBALS; break;
+	case Page::Patterns: nID = tabID = IDD_CONTROL_PATTERNS; break;
+	case Page::Samples: nID = tabID = IDD_CONTROL_SAMPLES; break;
+	case Page::Instruments: nID = tabID = IDD_CONTROL_INSTRUMENTS; break;
+	case Page::AI: nID = tabID = AI::PanelPageId; break;
+	case Page::PianoRoll: nID = IDD_CONTROL_PIANOROLL; tabID = PianoRoll::PanelPageId; break;
 	default: return false;
 	}
 
@@ -384,7 +392,7 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 	int tabIndex = -1;
 	for(int i = 0; i < m_TabCtrl.GetItemCount(); i++)
 	{
-		if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == nID)
+		if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == tabID)
 		{
 			tabIndex = i;
 			break;
@@ -478,6 +486,9 @@ bool CModControlView::SetActivePage(Page page, LPARAM lParam)
 		case IDD_CONTROL_INSTRUMENTS:
 			pDlg = new CCtrlInstruments(*this, *GetDocument());
 			break;
+		case IDD_CONTROL_PIANOROLL:
+			pDlg = new CCtrlPianoRoll(*this, *GetDocument());
+			break;
 		default:
 			return false;
 		}
@@ -530,7 +541,7 @@ void CModControlView::UpdateView(UpdateHint lHint, CObject *pObject)
 	// Module type changed: update tabs
 	if (lHint.GetType()[HINT_MODTYPE])
 	{
-		UINT nCount = 5;
+		UINT nCount = 6;
 		UINT mask = 1 | 2 | 4 | 16;
 
 		if(pDoc->GetSoundFile().GetModSpecifications().instrumentsMax > 0 || pDoc->GetNumInstruments() > 0)
@@ -552,11 +563,17 @@ void CModControlView::UpdateView(UpdateHint lHint, CObject *pObject)
 			if (mask & 8) m_TabCtrl.InsertItem(count++, _T("Instruments"), IDD_CONTROL_INSTRUMENTS, IMAGE_INSTRUMENTS);
 			//if (mask & 32) m_TabCtrl.InsertItem(count++, _T("Graph"), IDD_CONTROL_GRAPH, IMAGE_GRAPH); //rewbs.graph
 			if (mask & 16) m_TabCtrl.InsertItem(count++, _T("Comments"), IDD_CONTROL_COMMENTS, IMAGE_COMMENTS);
+			m_TabCtrl.InsertItem(count++, _T("Piano Roll"), PianoRoll::PanelPageId, IMAGE_PATTERNS);
 			m_TabCtrl.InsertItem(count++, _T("AI / MCP"), AI::PanelPageId, IMAGE_GENERAL);
 			if(m_nActiveDlg == Page::AI)
 			{
 				for(int i = 0; i < m_TabCtrl.GetItemCount(); i++)
 					if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == AI::PanelPageId) { m_TabCtrl.SetCurSel(i); break; }
+			}
+			else if(m_nActiveDlg == Page::PianoRoll)
+			{
+				for(int i = 0; i < m_TabCtrl.GetItemCount(); i++)
+					if(static_cast<UINT>(m_TabCtrl.GetItemData(i)) == PianoRoll::PanelPageId) { m_TabCtrl.SetCurSel(i); break; }
 			}
 		}
 	}
