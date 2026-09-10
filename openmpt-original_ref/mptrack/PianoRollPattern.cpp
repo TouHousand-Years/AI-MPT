@@ -27,11 +27,13 @@ using ViewFilter = PianoRollPattern::ViewFilter;
 
 struct CellKey
 {
+	PATTERNINDEX pattern = 0;
 	ROWINDEX row = 0;
 	CHANNELINDEX channel = 0;
 
 	bool operator<(const CellKey &other) const
 	{
+		if(pattern != other.pattern) return pattern < other.pattern;
 		return row != other.row ? row < other.row : channel < other.channel;
 	}
 };
@@ -42,15 +44,15 @@ struct CellChange
 	ModCommand after;
 };
 
-struct Placement
+struct NoteBlock
 {
-	ROWINDEX row = 0;
-	CHANNELINDEX requestedChannel = 0;
+	PATTERNINDEX pattern = 0;
+	ROWINDEX start = 0, end = 1;
 	CHANNELINDEX sourceChannel = 0;
 	ModCommand::NOTE pitch = NOTE_NONE;
 	ModCommand::INSTR instrument = 0;
 	std::optional<ModCommand::VOL> volume;
-	std::optional<NoteRef> source;
+	bool affected = false;
 };
 
 bool IsTermination(const ModCommand &cell)
@@ -107,6 +109,7 @@ CString DefaultUndoName(const PianoRollPattern::OperationType type)
 	case PianoRollPattern::OperationType::Transpose: return _T("Piano Roll: Transpose Notes");
 	case PianoRollPattern::OperationType::Resize: return _T("Piano Roll: Resize Notes");
 	case PianoRollPattern::OperationType::Paste: return _T("Piano Roll: Paste Notes");
+	case PianoRollPattern::OperationType::NormalizeChannels: return _T("Piano Roll: Split Channels by Instrument");
 	}
 	return _T("Piano Roll Edit");
 }
@@ -213,321 +216,314 @@ PianoRollPattern::Projection PianoRollPattern::Read(PATTERNINDEX pattern, const 
 			note.instrument = cell.instr;
 			if(cell.volcmd == VOLCMD_VOLUME)
 				note.volume = cell.vol;
+			note.volumeCommand = cell.volcmd;
+			note.volumeParameter = cell.vol;
+			note.effectCommand = cell.command;
+			note.effectParameter = cell.param;
 			projection.notes.push_back(std::move(note));
 		}
 	}
 	return projection;
 }
 
-PianoRollPattern::EditResult PianoRollPattern::Apply(const Operation &operation)
+namespace
 {
-	auto &sndFile = m_document.GetSoundFile();
+
+EditResult ApplyRepacked(CModDoc &document, const Operation &operation)
+{
+	auto &sndFile = document.GetSoundFile();
 	const CHANNELINDEX originalChannels = sndFile.GetNumChannels();
-	if(m_document.AIOccupied())
-		return Failure(_T("AI retained occupancy makes Piano Roll edits read-only."), originalChannels);
-	if(!sndFile.Patterns.IsValidPat(operation.pattern))
-		return Failure(_T("The selected Pattern no longer exists."), originalChannels);
-
+	if(document.AIOccupied()) return Failure(_T("AI retained occupancy makes Piano Roll edits read-only."), originalChannels);
+	if(!sndFile.Patterns.IsValidPat(operation.pattern)) return Failure(_T("The selected Pattern no longer exists."), originalChannels);
 	const auto &specs = sndFile.GetModSpecifications();
-	const ROWINDEX rows = sndFile.Patterns[operation.pattern].GetNumRows();
-	if(operation.type == OperationType::Resize && !specs.hasNoteOff)
-		return Failure(_T("This module format cannot represent an exact note-off."), originalChannels);
+	if(!specs.hasNoteOff) return Failure(_T("This module format cannot represent explicit Piano Roll note lengths."), originalChannels);
 
-	std::map<CellKey, CellChange> changes;
-	std::set<CellKey> sourceCells;
-	std::vector<Placement> placements;
-	std::vector<NoteRef> validSources;
-	std::vector<NoteRef> resizedDestinations;
+	// Resolve instrument memory at the channel level before turning Tracker
+	// events into explicit Piano Roll blocks. A mixed channel is precisely what
+	// this normalization is designed to split.
+	std::vector<std::set<ModCommand::INSTR>> channelInstruments(originalChannels);
+	for(PATTERNINDEX pat = 0; pat < sndFile.Patterns.Size(); ++pat)
+	{
+		if(!sndFile.Patterns.IsValidPat(pat)) continue;
+		for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
+			for(ROWINDEX row = 0; row < sndFile.Patterns[pat].GetNumRows(); ++row)
+			{
+				const auto &cell = *sndFile.Patterns[pat].GetpModCommand(row, channel);
+				if(ModCommand::IsNote(cell.note) && cell.instr != 0) channelInstruments[channel].insert(cell.instr);
+			}
+	}
 
-	const ModCommand emptyCell{};
-	auto current = [&](ROWINDEX row, CHANNELINDEX channel) -> const ModCommand &
+	std::vector<NoteBlock> blocks;
+	std::set<CellKey> managedStops;
+	for(PATTERNINDEX pat = 0; pat < sndFile.Patterns.Size(); ++pat)
 	{
-		if(channel >= originalChannels)
-			return emptyCell;
-		return *sndFile.Patterns[operation.pattern].GetpModCommand(row, channel);
-	};
-	auto mutableCell = [&](ROWINDEX row, CHANNELINDEX channel) -> ModCommand &
+		if(!sndFile.Patterns.IsValidPat(pat)) continue;
+		const auto &pattern = sndFile.Patterns[pat];
+		for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
+		{
+			ModCommand::INSTR remembered = channelInstruments[channel].size() == 1 ? *channelInstruments[channel].begin() : 0;
+			for(ROWINDEX row = 0; row < pattern.GetNumRows(); ++row)
+			{
+				const ModCommand &cell = *pattern.GetpModCommand(row, channel);
+				if(cell.instr != 0 && ModCommand::IsNote(cell.note)) remembered = cell.instr;
+				if(!ModCommand::IsNote(cell.note)) continue;
+				ROWINDEX end = pattern.GetNumRows();
+				for(ROWINDEX next = row + 1; next < pattern.GetNumRows(); ++next)
+				{
+					const ModCommand &termination = *pattern.GetpModCommand(next, channel);
+					if(!IsTermination(termination)) continue;
+					end = next;
+					if(termination.note == NOTE_KEYOFF) managedStops.insert({pat, next, channel});
+					break;
+				}
+				blocks.push_back({pat, row, end, channel, cell.note, cell.instr ? cell.instr : remembered,
+					cell.volcmd == VOLCMD_VOLUME ? std::optional<ModCommand::VOL>(cell.vol) : std::nullopt, false});
+			}
+		}
+	}
+
+	auto findBlock = [&](const NoteRef &ref) -> NoteBlock *
 	{
-		const CellKey key{row, channel};
-		auto found = changes.find(key);
-		if(found == changes.end())
-			found = changes.emplace(key, CellChange{current(row, channel), current(row, channel)}).first;
-		return found->second.after;
-	};
-	auto validateSource = [&](const NoteRef &source, ModCommand *&cell) -> bool
-	{
-		if(source.pattern != operation.pattern || source.row >= rows || source.channel >= originalChannels)
-			return false;
-		cell = sndFile.Patterns[operation.pattern].GetpModCommand(source.row, source.channel);
-		return IsPitched(cell->note);
+		auto found = std::find_if(blocks.begin(), blocks.end(), [&](const NoteBlock &block)
+		{
+			return block.pattern == ref.pattern && block.start == ref.row && block.sourceChannel == ref.channel;
+		});
+		return found == blocks.end() ? nullptr : &*found;
 	};
 
-	if(operation.type == OperationType::Insert)
+	if(operation.type == PianoRollPattern::OperationType::Insert)
 	{
-		if(operation.row >= rows || operation.channel >= originalChannels || operation.pitch < specs.noteMin || operation.pitch > specs.noteMax)
-			return Failure(_T("The note position or pitch is outside this Pattern or module format."), originalChannels);
-		if(!IsExistingInstrumentOrSample(sndFile, operation.instrument))
-			return Failure(_T("Choose an existing instrument or sample before drawing a note."), originalChannels);
-		if(operation.volume && (*operation.volume > 64 || !specs.HasVolCommand(VOLCMD_VOLUME)))
-			return Failure(_T("The selected volume cannot be represented by this module format."), originalChannels);
-		placements.push_back({operation.row, operation.channel, operation.channel, static_cast<ModCommand::NOTE>(operation.pitch), operation.instrument, operation.volume, {}});
-	} else if(operation.type == OperationType::Paste)
+		const ROWINDEX rows = sndFile.Patterns[operation.pattern].GetNumRows();
+		if(operation.row >= rows || operation.pitch < specs.noteMin || operation.pitch > specs.noteMax
+			|| !IsExistingInstrumentOrSample(sndFile, operation.instrument)
+			|| (operation.volume && (*operation.volume > 64 || !specs.HasVolCommand(VOLCMD_VOLUME))))
+			return Failure(_T("Choose an existing instrument and a valid empty Piano Roll position."), originalChannels);
+		const ROWINDEX end = static_cast<ROWINDEX>(std::min<uint64>(rows, static_cast<uint64>(operation.row) + std::max<ROWINDEX>(1, operation.length)));
+		blocks.push_back({operation.pattern, operation.row, end, operation.channel, static_cast<ModCommand::NOTE>(operation.pitch), operation.instrument, operation.volume, true});
+	} else if(operation.type == PianoRollPattern::OperationType::Paste)
 	{
-		if(operation.clipboard.empty())
-			return Failure(_T("The Piano Roll clipboard is empty."), originalChannels);
+		if(operation.clipboard.empty()) return Failure(_T("The Piano Roll clipboard is empty."), originalChannels);
+		const ROWINDEX rows = sndFile.Patterns[operation.pattern].GetNumRows();
 		for(const auto &clip : operation.clipboard)
 		{
-			const uint64 targetRow = static_cast<uint64>(operation.row) + clip.relativeRow;
-			const int targetPitch = operation.pitch + clip.relativePitch;
-			if(targetRow >= rows || targetPitch < specs.noteMin || targetPitch > specs.noteMax || !IsExistingInstrumentOrSample(sndFile, clip.instrument)
+			const uint64 start = static_cast<uint64>(operation.row) + clip.relativeRow;
+			const uint64 end = start + std::max<ROWINDEX>(1, clip.length);
+			const int pitch = operation.pitch + clip.relativePitch;
+			if(start >= rows || end > rows || pitch < specs.noteMin || pitch > specs.noteMax || !IsExistingInstrumentOrSample(sndFile, clip.instrument)
 				|| (clip.volume && (*clip.volume > 64 || !specs.HasVolCommand(VOLCMD_VOLUME))))
 				return Failure(_T("The clipboard cannot be expressed in this Pattern or module format."), originalChannels);
-			placements.push_back({static_cast<ROWINDEX>(targetRow), static_cast<CHANNELINDEX>(operation.channel + clip.relativeChannel), operation.channel,
-				static_cast<ModCommand::NOTE>(targetPitch), clip.instrument, clip.volume, {}});
+			blocks.push_back({operation.pattern, static_cast<ROWINDEX>(start), static_cast<ROWINDEX>(end), operation.channel,
+				static_cast<ModCommand::NOTE>(pitch), clip.instrument, clip.volume, true});
 		}
-	} else
+	} else if(operation.type != PianoRollPattern::OperationType::NormalizeChannels)
 	{
-		if(operation.notes.empty())
-			return Failure(_T("No Piano Roll notes are selected."), originalChannels);
-		for(const auto &source : operation.notes)
+		if(operation.notes.empty()) return Failure(_T("No Piano Roll notes are selected."), originalChannels);
+		std::vector<NoteBlock *> selected;
+		for(const auto &ref : operation.notes)
 		{
-			ModCommand *cell = nullptr;
-			if(!validateSource(source, cell))
-				return Failure(_T("A selected note changed outside the Piano Roll."), originalChannels);
-			const CellKey key{source.row, source.channel};
-			if(!sourceCells.insert(key).second)
-				continue;
-			validSources.push_back(source);
+			NoteBlock *block = findBlock(ref);
+			if(!block) return Failure(_T("A selected note changed outside the Piano Roll."), originalChannels);
+			if(std::find(selected.begin(), selected.end(), block) == selected.end()) selected.push_back(block);
 		}
-		if(validSources.empty())
-			return Failure(_T("No Piano Roll notes are selected."), originalChannels);
-	}
-
-	if(operation.type == OperationType::Delete)
-	{
-		for(const auto &source : validSources)
-			ClearEditableFields(mutableCell(source.row, source.channel));
-	} else if(operation.type == OperationType::Transpose)
-	{
-		for(const auto &source : validSources)
+		if(operation.type == PianoRollPattern::OperationType::Delete)
 		{
-			const int pitch = current(source.row, source.channel).note + operation.pitchDelta;
-			if(pitch < specs.noteMin || pitch > specs.noteMax)
-				return Failure(_T("The transposed note is outside this module format's note range."), originalChannels);
-			mutableCell(source.row, source.channel).note = static_cast<ModCommand::NOTE>(pitch);
-		}
-	} else if(operation.type == OperationType::Resize)
-	{
-		for(const auto &source : validSources)
-		{
-			const auto projection = Read(operation.pattern);
-			auto note = std::find_if(projection.notes.begin(), projection.notes.end(), [&](const Note &candidate) { return candidate.id == source; });
-			if(note == projection.notes.end()) return Failure(_T("A selected note changed outside the Piano Roll."), originalChannels);
-			if(operation.resizeFromLeft)
+			std::set<std::tuple<PATTERNINDEX, ROWINDEX, CHANNELINDEX>> deleting;
+			for(const NoteBlock *block : selected) deleting.emplace(block->pattern, block->start, block->sourceChannel);
+			blocks.erase(std::remove_if(blocks.begin(), blocks.end(), [&](const NoteBlock &block)
 			{
-				const int64 startValue = static_cast<int64>(source.row) + operation.rowDelta;
-				if(startValue < 0 || startValue >= note->endRow)
-					return Failure(_T("The left note edge must stay before its Tracker termination."), originalChannels);
-				const ROWINDEX newStart = static_cast<ROWINDEX>(startValue);
-				if(newStart == source.row) continue;
-				const ModCommand &sourceCell = current(source.row, source.channel);
-				const ModCommand &target = current(newStart, source.channel);
-				if(target.note != NOTE_NONE || target.instr != 0 || target.volcmd == VOLCMD_VOLUME
-					|| (sourceCell.volcmd == VOLCMD_VOLUME && target.volcmd != VOLCMD_NONE))
-					return Failure(_T("The requested left note edge conflicts with Tracker note, instrument, or volume data."), originalChannels);
-				ClearEditableFields(mutableCell(source.row, source.channel));
-				ModCommand &destination = mutableCell(newStart, source.channel);
-				destination.note = sourceCell.note;
-				destination.instr = sourceCell.instr;
-				if(sourceCell.volcmd == VOLCMD_VOLUME)
+				return deleting.count({block.pattern, block.start, block.sourceChannel}) != 0;
+			}), blocks.end());
+		} else
+		{
+			for(NoteBlock *block : selected)
+			{
+				block->affected = true;
+				if(operation.type == PianoRollPattern::OperationType::Transpose)
 				{
-					destination.volcmd = VOLCMD_VOLUME;
-					destination.vol = sourceCell.vol;
-				}
-				resizedDestinations.push_back({operation.pattern, newStart, source.channel});
-				continue;
-			}
-
-			const uint64 endValue = static_cast<uint64>(source.row) + std::max<ROWINDEX>(1, operation.length);
-			if(endValue > rows)
-				return Failure(_T("The right note edge is outside this Pattern."), originalChannels);
-			const ROWINDEX newEnd = static_cast<ROWINDEX>(endValue);
-			if(newEnd == note->endRow) continue;
-			if(newEnd > note->endRow)
-			{
-				// An implicit end is another pitched or special Tracker event and
-				// cannot be moved. An explicit key-off may instead be moved right
-				// or removed to use the Pattern end as the implicit endpoint.
-				if(note->endRow >= rows || current(note->endRow, source.channel).note != NOTE_KEYOFF)
-					return Failure(_T("A note cannot be lengthened through the next Tracker note or termination event."), originalChannels);
-				for(ROWINDEX row = static_cast<ROWINDEX>(note->endRow + 1); row < newEnd; ++row)
-					if(current(row, source.channel).note != NOTE_NONE)
-						return Failure(_T("A note cannot be lengthened through the next Tracker note or termination event."), originalChannels);
-				mutableCell(note->endRow, source.channel).note = NOTE_NONE;
-				if(newEnd < rows)
+					const int pitch = block->pitch + operation.pitchDelta;
+					if(pitch < specs.noteMin || pitch > specs.noteMax) return Failure(_T("The transposed note is outside this module format's note range."), originalChannels);
+					block->pitch = static_cast<ModCommand::NOTE>(pitch);
+				} else if(operation.type == PianoRollPattern::OperationType::Move)
 				{
-					if(current(newEnd, source.channel).note != NOTE_NONE)
-						return Failure(_T("The requested note-off conflicts with existing Tracker data."), originalChannels);
-					mutableCell(newEnd, source.channel).note = NOTE_KEYOFF;
+					const int64 start = static_cast<int64>(block->start) + operation.rowDelta;
+					const int64 end = static_cast<int64>(block->end) + operation.rowDelta;
+					const int pitch = block->pitch + operation.pitchDelta;
+					if(start < 0 || end > sndFile.Patterns[block->pattern].GetNumRows() || pitch < specs.noteMin || pitch > specs.noteMax)
+						return Failure(_T("The moved note is outside this Pattern or module format."), originalChannels);
+					block->start = static_cast<ROWINDEX>(start);
+					block->end = static_cast<ROWINDEX>(end);
+					block->pitch = static_cast<ModCommand::NOTE>(pitch);
+				} else if(operation.type == PianoRollPattern::OperationType::Resize)
+				{
+					if(operation.resizeFromLeft)
+					{
+						const int64 start = static_cast<int64>(block->start) + operation.rowDelta;
+						if(start < 0 || start >= block->end) return Failure(_T("The left note edge must stay before its end."), originalChannels);
+						block->start = static_cast<ROWINDEX>(start);
+					} else
+					{
+						const uint64 end = static_cast<uint64>(block->start) + std::max<ROWINDEX>(1, operation.length);
+						if(end > sndFile.Patterns[block->pattern].GetNumRows()) return Failure(_T("The right note edge is outside this Pattern."), originalChannels);
+						block->end = static_cast<ROWINDEX>(end);
+					}
 				}
-				continue;
 			}
-			const ModCommand &target = current(newEnd, source.channel);
-			if(target.note != NOTE_NONE)
-				return Failure(_T("The requested note-off conflicts with existing Tracker data."), originalChannels);
-			mutableCell(newEnd, source.channel).note = NOTE_KEYOFF;
-			if(note->endRow < rows && current(note->endRow, source.channel).note == NOTE_KEYOFF)
-				mutableCell(note->endRow, source.channel).note = NOTE_NONE;
-		}
-		validSources.insert(validSources.end(), resizedDestinations.begin(), resizedDestinations.end());
-	} else if(operation.type == OperationType::Move)
-	{
-		for(const auto &source : validSources)
-		{
-			const int64 row = static_cast<int64>(source.row) + operation.rowDelta;
-			const int pitch = current(source.row, source.channel).note + operation.pitchDelta;
-			if(row < 0 || row >= rows || pitch < specs.noteMin || pitch > specs.noteMax)
-				return Failure(_T("The moved note is outside this Pattern or module format."), originalChannels);
-			const ModCommand &cell = current(source.row, source.channel);
-			placements.push_back({static_cast<ROWINDEX>(row), source.channel, source.channel, static_cast<ModCommand::NOTE>(pitch), cell.instr,
-				cell.volcmd == VOLCMD_VOLUME ? std::optional<ModCommand::VOL>(cell.vol) : std::nullopt, source});
 		}
 	}
 
-	// Delete sources in the virtual result before resolving destinations.  This
-	// makes a swap or a move into another selected cell deterministic, while all
-	// non-editable fields in those cells stay byte-for-byte unchanged.
-	if(operation.type == OperationType::Move)
-		for(const auto &source : validSources)
-			ClearEditableFields(mutableCell(source.row, source.channel));
-
-	CHANNELINDEX plannedChannels = originalChannels;
-	std::vector<CHANNELINDEX> newChannelSources;
-	std::set<CellKey> placed;
-	auto effective = [&](ROWINDEX row, CHANNELINDEX channel) -> const ModCommand &
+	// Stable interval partitioning is the "falling bricks" rule: each
+	// instrument owns a channel group, and each note takes the lowest layer that
+	// is free for its whole explicit half-open interval.
+	std::map<ModCommand::INSTR, std::vector<NoteBlock *>> groups;
+	for(auto &block : blocks) groups[block.instrument].push_back(&block);
+	std::map<ModCommand::INSTR, size_t> layerCounts;
+	std::map<NoteBlock *, size_t> layers;
+	for(auto &[instrument, notes] : groups)
 	{
-		const auto found = changes.find({row, channel});
-		return found == changes.end() ? current(row, channel) : found->second.after;
-	};
-	auto canUse = [&](const Placement &placement, CHANNELINDEX channel) -> bool
-	{
-		const CellKey key{placement.row, channel};
-		if(placed.count(key)) return false;
-		const auto &target = effective(placement.row, channel);
-		if(target.note != NOTE_NONE || target.instr != 0) return false;
-		if(target.volcmd == VOLCMD_VOLUME) return false;
-		if(placement.volume && target.volcmd != VOLCMD_NONE) return false;
-		return true;
-	};
-	auto resolveChannel = [&](const Placement &placement, CHANNELINDEX &resolved) -> bool
-	{
-		for(CHANNELINDEX offset = 0; offset < originalChannels; ++offset)
+		std::map<PATTERNINDEX, std::vector<ROWINDEX>> layerEnds;
+		std::stable_sort(notes.begin(), notes.end(), [](const NoteBlock *a, const NoteBlock *b)
 		{
-			const CHANNELINDEX candidate = static_cast<CHANNELINDEX>((placement.requestedChannel + offset) % originalChannels);
-			if(operation.viewFilter.IsVisible(candidate, originalChannels) && canUse(placement, candidate))
+			if(a->pattern != b->pattern) return a->pattern < b->pattern;
+			if(a->start != b->start) return a->start < b->start;
+			return a->sourceChannel < b->sourceChannel;
+		});
+		for(NoteBlock *block : notes)
+		{
+			auto &ends = layerEnds[block->pattern];
+			size_t layer = 0;
+			while(layer < ends.size() && ends[layer] > block->start) layer++;
+			if(layer == ends.size()) ends.push_back(0);
+			ends[layer] = block->end;
+			layers[block] = layer;
+			layerCounts[instrument] = std::max(layerCounts[instrument], layer + 1);
+		}
+	}
+
+	size_t requiredChannels = 0;
+	for(const auto &[instrument, count] : layerCounts) requiredChannels += count;
+	const CHANNELINDEX workingChannels = static_cast<CHANNELINDEX>(std::max<size_t>(requiredChannels, originalChannels));
+	if(workingChannels > specs.channelsMax) return Failure(_T("The instrument groups need more channels than this module format permits."), originalChannels);
+	std::map<ModCommand::INSTR, CHANNELINDEX> groupStarts;
+	CHANNELINDEX nextChannel = 0;
+	for(const auto &[instrument, count] : layerCounts)
+	{
+		groupStarts[instrument] = nextChannel;
+		nextChannel = static_cast<CHANNELINDEX>(nextChannel + count);
+	}
+
+	std::map<CellKey, CellChange> changes;
+	auto originalCell = [&](PATTERNINDEX pat, ROWINDEX row, CHANNELINDEX channel) -> ModCommand
+	{
+		if(channel >= originalChannels) return {};
+		return *sndFile.Patterns[pat].GetpModCommand(row, channel);
+	};
+	auto mutableCell = [&](PATTERNINDEX pat, ROWINDEX row, CHANNELINDEX channel) -> ModCommand &
+	{
+		CellKey key{pat, row, channel};
+		auto found = changes.find(key);
+		if(found == changes.end())
+		{
+			const ModCommand cell = originalCell(pat, row, channel);
+			found = changes.emplace(key, CellChange{cell, cell}).first;
+		}
+		return found->second.after;
+	};
+	for(PATTERNINDEX pat = 0; pat < sndFile.Patterns.Size(); ++pat)
+	{
+		if(!sndFile.Patterns.IsValidPat(pat)) continue;
+		for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
+			for(ROWINDEX row = 0; row < sndFile.Patterns[pat].GetNumRows(); ++row)
 			{
-				resolved = candidate;
-				return true;
+				const ModCommand cell = originalCell(pat, row, channel);
+				if(ModCommand::IsNote(cell.note)) ClearEditableFields(mutableCell(pat, row, channel));
+				else if(managedStops.count({pat, row, channel})) mutableCell(pat, row, channel).note = NOTE_NONE;
 			}
-		}
-		for(CHANNELINDEX channel = originalChannels; channel < plannedChannels; ++channel)
+	}
+	std::set<CellKey> starts;
+	std::vector<NoteRef> affected;
+	for(NoteBlock &block : blocks)
+	{
+		const CHANNELINDEX channel = static_cast<CHANNELINDEX>(groupStarts[block.instrument] + layers[&block]);
+		ModCommand &cell = mutableCell(block.pattern, block.start, channel);
+		if(cell.note >= NOTE_MIN_SPECIAL || cell.instr != 0 || cell.volcmd == VOLCMD_VOLUME)
+			return Failure(_T("A Piano Roll note conflicts with Tracker-only data while splitting channels."), originalChannels);
+		cell.note = block.pitch;
+		cell.instr = block.instrument;
+		if(block.volume)
 		{
-			if(canUse(placement, channel))
+			cell.volcmd = VOLCMD_VOLUME;
+			cell.vol = *block.volume;
+		}
+		starts.insert({block.pattern, block.start, channel});
+		if(block.affected) affected.push_back({block.pattern, block.start, channel});
+	}
+	for(NoteBlock &block : blocks)
+	{
+		if(block.end >= sndFile.Patterns[block.pattern].GetNumRows()) continue;
+		const CHANNELINDEX channel = static_cast<CHANNELINDEX>(groupStarts[block.instrument] + layers[&block]);
+		if(starts.count({block.pattern, block.end, channel})) continue;
+		ModCommand &cell = mutableCell(block.pattern, block.end, channel);
+		if(cell.note == NOTE_NONE) cell.note = NOTE_KEYOFF;
+	}
+
+	// Keep channels that still contain Tracker-only data, but discard empty
+	// trailing layers created by earlier Piano Roll overlap operations.
+	size_t usedChannels = requiredChannels;
+	for(CHANNELINDEX channel = 0; channel < workingChannels; ++channel)
+	{
+		bool used = false;
+		for(PATTERNINDEX pat = 0; pat < sndFile.Patterns.Size() && !used; ++pat)
+		{
+			if(!sndFile.Patterns.IsValidPat(pat)) continue;
+			for(ROWINDEX row = 0; row < sndFile.Patterns[pat].GetNumRows(); ++row)
 			{
-				resolved = channel;
-				return true;
+				const CellKey key{pat, row, channel};
+				const auto changedCell = changes.find(key);
+				const ModCommand &cell = changedCell != changes.end() ? changedCell->second.after : originalCell(pat, row, channel);
+				if(!cell.IsEmpty()) { used = true; break; }
 			}
 		}
-		if(plannedChannels >= specs.channelsMax) return false;
-		resolved = plannedChannels++;
-		newChannelSources.push_back(std::min<CHANNELINDEX>(placement.sourceChannel, originalChannels - 1));
-		return true;
-	};
-
-	for(const auto &placement : placements)
-	{
-		// PC / PCS and the Tracker's other special note events do not describe
-		// a graphical note. They are not ordinary occupancy that may silently
-		// be routed around: accepting a request whose intended cell contains one
-		// would make a multi-note paste non-deterministic and could disguise an
-		// unrepresentable edit. Effects and non-volume volume commands remain
-		// valid pure-effect destinations and are deliberately not included here.
-		if(placement.requestedChannel < originalChannels
-			&& current(placement.row, placement.requestedChannel).note >= NOTE_MIN_SPECIAL)
-			return Failure(_T("A Piano Roll edit cannot target a PC, PCS, or other special-note cell."), originalChannels);
-		CHANNELINDEX channel = 0;
-		if(!resolveChannel(placement, channel))
-			return Failure(_T("No visible free channel is available and the module has reached its channel limit."), originalChannels);
-		ModCommand &destination = mutableCell(placement.row, channel);
-		destination.note = placement.pitch;
-		destination.instr = placement.instrument;
-		if(placement.volume)
-		{
-			destination.volcmd = VOLCMD_VOLUME;
-			destination.vol = *placement.volume;
-		}
-		placed.insert({placement.row, channel});
-		validSources.push_back({operation.pattern, placement.row, channel});
+		if(used) usedChannels = std::max(usedChannels, static_cast<size_t>(channel + 1));
 	}
+	const CHANNELINDEX plannedChannels = static_cast<CHANNELINDEX>(std::max<size_t>(usedChannels, specs.channelsMin));
 
-	bool changed = false;
-	for(const auto &[key, change] : changes)
-	{
-		if(change.before.note != change.after.note || change.before.instr != change.after.instr
-			|| change.before.volcmd != change.after.volcmd || change.before.vol != change.after.vol)
-		{
-			changed = true;
-			break;
-		}
-	}
-	if(!changed)
-		return Failure(_T("The requested Piano Roll edit makes no change."), originalChannels);
-
+	bool changed = plannedChannels != originalChannels;
+	for(const auto &[key, change] : changes) if(change.before != change.after) { changed = true; break; }
+	if(!changed) return Failure(_T("The requested Piano Roll edit makes no change."), originalChannels);
 	const CString undoText = operation.undoName.IsEmpty() ? DefaultUndoName(operation.type) : operation.undoName;
 	const std::string undoName = mpt::ToCharset(mpt::Charset::Locale, undoText);
-	const bool addingChannels = plannedChannels != originalChannels;
-	if(addingChannels)
+	if(!PrepareAllPatternUndo(document, undoName.c_str())) return Failure(_T("OpenMPT could not prepare an Undo step; no data was changed."), originalChannels);
+	if(plannedChannels != originalChannels)
 	{
-		if(!PrepareAllPatternUndo(m_document, undoName.c_str()))
-			return Failure(_T("OpenMPT could not prepare an Undo step; no data was changed."), originalChannels);
-		std::vector<CHANNELINDEX> channelOrder(plannedChannels, CHANNELINDEX_INVALID);
-		std::iota(channelOrder.begin(), channelOrder.begin() + originalChannels, CHANNELINDEX(0));
-		for(CHANNELINDEX index = originalChannels; index < plannedChannels; ++index)
-			channelOrder[index] = newChannelSources[index - originalChannels];
-		if(m_document.ReArrangeChannels(channelOrder, false) != plannedChannels)
+		std::vector<CHANNELINDEX> order(plannedChannels, CHANNELINDEX_INVALID);
+		std::iota(order.begin(), order.begin() + std::min(originalChannels, plannedChannels), CHANNELINDEX(0));
+		if(document.ReArrangeChannels(order, false) != plannedChannels)
 		{
-			RemoveAllPatternUndo(m_document);
-			return Failure(_T("OpenMPT could not allocate the required channels; no data was changed."), originalChannels);
+			RemoveAllPatternUndo(document);
+			return Failure(_T("OpenMPT could not allocate the required instrument layers; no data was changed."), originalChannels);
 		}
-	} else if(!m_document.GetPatternUndo().PrepareUndo(operation.pattern, 0, 0, originalChannels, rows, undoName.c_str()))
-	{
-		return Failure(_T("OpenMPT could not prepare an Undo step; no data was changed."), originalChannels);
 	}
-
 	{
 		CriticalSection guard;
 		for(const auto &[key, change] : changes)
-		{
-			ModCommand &destination = *sndFile.Patterns[operation.pattern].GetpModCommand(key.row, key.channel);
-			// Deliberately never assign a whole ModCommand: effect fields, PC/PCS,
-			// and non-volume volume commands must survive every Piano Roll edit.
-			destination.note = change.after.note;
-			destination.instr = change.after.instr;
-			destination.volcmd = change.after.volcmd;
-			destination.vol = change.after.vol;
-		}
+			if(key.channel < plannedChannels)
+				*sndFile.Patterns[key.pattern].GetpModCommand(key.row, key.channel) = change.after;
 	}
-	m_document.SetModified();
-	m_document.UpdateAllViews(nullptr, PatternHint(operation.pattern).Data().Undo());
-	if(addingChannels)
-		m_document.UpdateAllViews(nullptr, GeneralHint().Channels().ModType());
-
+	document.SetModified();
+	document.UpdateAllViews(nullptr, GeneralHint().Channels().ModType());
 	EditResult result;
 	result.applied = true;
-	result.channelsAdded = addingChannels;
+	result.channelsAdded = plannedChannels != originalChannels;
 	result.channels = plannedChannels;
-	result.affected = std::move(validSources);
+	result.affected = std::move(affected);
 	return result;
+}
+
+} // namespace
+
+PianoRollPattern::EditResult PianoRollPattern::Apply(const Operation &operation)
+{
+	return ApplyRepacked(m_document, operation);
 }
 
 OPENMPT_NAMESPACE_END

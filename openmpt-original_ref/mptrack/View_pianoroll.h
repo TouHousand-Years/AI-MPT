@@ -27,6 +27,8 @@ private:
 	CHANNELINDEX m_previewChannel = CHANNELINDEX_INVALID;
 	ModCommand::NOTE m_previewPitch = NOTE_NONE;
 	ROWINDEX m_playRow = ROWINDEX_INVALID;
+	DWORD m_lastEmptyClickTime = 0;
+	CPoint m_lastEmptyClickPoint{-10000, -10000};
 
 public:
 	CViewPianoRoll() = default;
@@ -53,17 +55,19 @@ private:
 	bool IsSelected(const PianoRollPattern::NoteRef &note) const;
 	void SelectOnly(const PianoRollPattern::NoteRef &note);
 	void ToggleSelection(const PianoRollPattern::NoteRef &note);
-	void Commit(PianoRollPattern::Operation operation);
+	bool Commit(PianoRollPattern::Operation operation);
 	void CopySelection(bool cut);
 	void Paste();
 	void SelectAll();
 	void UndoRedo(bool undo);
 	void PreviewPitch(ModCommand::NOTE pitch);
 	void StopPreview();
+	bool InsertAtPoint(CPoint point);
 	void DrawNote(CDC &dc, const PianoRollPattern::Note &note, const PianoRollPattern::Projection &projection, const CPoint &delta = {}) const;
 	void DrawSelectionBox(CDC &dc) const;
 
 	void OnLButtonDown(UINT flags, CPoint point);
+	void OnLButtonDblClk(UINT flags, CPoint point);
 	void OnLButtonUp(UINT flags, CPoint point);
 	void OnRButtonUp(UINT flags, CPoint point);
 	void OnMouseMove(UINT flags, CPoint point);
@@ -77,6 +81,7 @@ private:
 	void OnEditCopy();
 	void OnEditPaste();
 	void OnEditSelectAll();
+	void OnSplitChannels();
 	LRESULT OnCustomKeyMsg(WPARAM command, LPARAM keyEvent);
 	void OnSize(UINT type, int cx, int cy);
 	void OnSetFocus(CWnd *oldWindow);

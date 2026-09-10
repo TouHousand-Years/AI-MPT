@@ -16,16 +16,15 @@ OPENMPT_NAMESPACE_BEGIN
 
 BEGIN_MESSAGE_MAP(CCtrlPianoRoll, CModControlDlg)
 	ON_CBN_SELENDOK(IDC_PIANOROLL_PATTERN, &CCtrlPianoRoll::OnPatternChanged)
-	ON_CBN_SELENDOK(IDC_PIANOROLL_CHANNEL, &CCtrlPianoRoll::OnChannelChanged)
 	ON_CBN_SELENDOK(IDC_PIANOROLL_INSTRUMENT, &CCtrlPianoRoll::OnInstrumentChanged)
 	ON_CBN_SELENDOK(IDC_PIANOROLL_SNAPROWS, &CCtrlPianoRoll::OnViewOptionsChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_SNAP, &CCtrlPianoRoll::OnViewOptionsChanged)
-	ON_BN_CLICKED(IDC_PIANOROLL_CHANNELFILTER, &CCtrlPianoRoll::OnViewOptionsChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_FOLLOWSONG, &CCtrlPianoRoll::OnViewOptionsChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_UNDO, &CCtrlPianoRoll::OnUndo)
 	ON_BN_CLICKED(IDC_PIANOROLL_REDO, &CCtrlPianoRoll::OnRedo)
 	ON_BN_CLICKED(IDC_PIANOROLL_PLAY, &CCtrlPianoRoll::OnPlay)
 	ON_BN_CLICKED(IDC_PIANOROLL_STOP, &CCtrlPianoRoll::OnStop)
+	ON_BN_CLICKED(IDC_PIANOROLL_SPLITCHANNELS, &CCtrlPianoRoll::OnSplitChannels)
 END_MESSAGE_MAP()
 
 CCtrlPianoRoll::CCtrlPianoRoll(CModControlView &parent, CModDoc &document)
@@ -42,7 +41,6 @@ void CCtrlPianoRoll::DoDataExchange(CDataExchange *pDX)
 {
 	CModControlDlg::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_PIANOROLL_PATTERN, m_pattern);
-	DDX_Control(pDX, IDC_PIANOROLL_CHANNEL, m_channel);
 	DDX_Control(pDX, IDC_PIANOROLL_INSTRUMENT, m_instrument);
 	DDX_Control(pDX, IDC_PIANOROLL_SNAPROWS, m_snapRows);
 }
@@ -57,7 +55,6 @@ BOOL CCtrlPianoRoll::OnInitDialog()
 	m_snapRows.SetItemData(m_snapRows.AddString(_T("8")), 8);
 	m_snapRows.SetCurSel(0);
 	CheckDlgButton(IDC_PIANOROLL_SNAP, BST_CHECKED);
-	CheckDlgButton(IDC_PIANOROLL_CHANNELFILTER, BST_CHECKED);
 	CheckDlgButton(IDC_PIANOROLL_FOLLOWSONG, BST_CHECKED);
 	m_initialized = true;
 	return TRUE;
@@ -97,20 +94,6 @@ void CCtrlPianoRoll::RebuildSelectors()
 	}
 	m_pattern.SetRedraw(TRUE);
 
-	m_channel.ResetContent();
-	for(CHANNELINDEX channel = 0; channel < m_sndFile.GetNumChannels(); ++channel)
-	{
-		CString label;
-		label.Format(_T("Channel %u"), channel + 1);
-		const int index = m_channel.AddString(label);
-		m_channel.SetItemData(index, channel);
-	}
-	if(!SelectComboData(m_channel, m_activeChannel) && m_channel.GetCount() > 0)
-	{
-		m_channel.SetCurSel(0);
-		m_activeChannel = 0;
-	}
-
 	m_instrument.ResetContent();
 	const int none = m_instrument.AddString(_T("Choose instrument / sample"));
 	m_instrument.SetItemData(none, 0);
@@ -134,10 +117,13 @@ void CCtrlPianoRoll::RebuildSelectors()
 			m_instrument.SetItemData(index, sample);
 		}
 	}
-	if(!SelectComboData(m_instrument, m_selectedInstrument))
+	if(m_selectedInstrument == 0 || !SelectComboData(m_instrument, m_selectedInstrument))
 	{
-		m_instrument.SetCurSel(0);
-		m_selectedInstrument = 0;
+		// A blank Piano Roll should be immediately writable. Prefer the first
+		// real instrument / sample instead of leaving the non-value prompt active.
+		const int initialSelection = m_instrument.GetCount() > 1 ? 1 : 0;
+		m_instrument.SetCurSel(initialSelection);
+		m_selectedInstrument = static_cast<ModCommand::INSTR>(m_instrument.GetItemData(initialSelection));
 	}
 }
 
@@ -149,13 +135,7 @@ ROWINDEX CCtrlPianoRoll::GetSnapRows() const
 
 PianoRollPattern::ViewFilter CCtrlPianoRoll::GetViewFilter() const
 {
-	PianoRollPattern::ViewFilter filter;
-	if(IsDlgButtonChecked(IDC_PIANOROLL_CHANNELFILTER) == BST_UNCHECKED)
-	{
-		filter.visibleChannels.resize(m_sndFile.GetNumChannels(), false);
-		if(m_activeChannel < filter.visibleChannels.size()) filter.visibleChannels[m_activeChannel] = true;
-	}
-	return filter;
+	return {};
 }
 
 void CCtrlPianoRoll::SetCurrentPattern(PATTERNINDEX pattern)
@@ -186,13 +166,6 @@ void CCtrlPianoRoll::OnPatternChanged()
 	if(selected >= 0) SetCurrentPattern(static_cast<PATTERNINDEX>(m_pattern.GetItemData(selected)));
 }
 
-void CCtrlPianoRoll::OnChannelChanged()
-{
-	const int selected = m_channel.GetCurSel();
-	if(selected >= 0) m_activeChannel = static_cast<CHANNELINDEX>(m_channel.GetItemData(selected));
-	SyncView();
-}
-
 void CCtrlPianoRoll::OnInstrumentChanged()
 {
 	const int selected = m_instrument.GetCurSel();
@@ -206,6 +179,11 @@ void CCtrlPianoRoll::OnViewOptionsChanged()
 		SendViewMessage(VIEWMSG_FOLLOWSONG, GetFollowSong());
 		SyncView();
 	}
+}
+
+void CCtrlPianoRoll::OnSplitChannels()
+{
+	if(m_hWndView) ::SendMessage(m_hWndView, WM_COMMAND, IDC_PIANOROLL_SPLITCHANNELS, 0);
 }
 
 void CCtrlPianoRoll::OnUndo() { if(m_hWndView) ::SendMessage(m_hWndView, WM_COMMAND, ID_EDIT_UNDO, 0); }
@@ -262,17 +240,24 @@ void CCtrlPianoRoll::OnActivatePage(LPARAM lParam)
 	if(CChildFrame *frame = static_cast<CChildFrame *>(GetParentFrame()))
 	{
 		auto &state = frame->GetPianoRollViewState();
+		const int trackerInstrument = m_parent.GetInstrumentChange();
 		if(state.initialized)
 		{
-			m_activeChannel = state.activeChannel;
-			m_selectedInstrument = state.instrument;
+			m_selectedInstrument = state.instrument != 0 ? state.instrument
+				: static_cast<ModCommand::INSTR>(std::max(0, trackerInstrument));
+			if((m_selectedInstrument == 0 || !SelectComboData(m_instrument, m_selectedInstrument)) && m_instrument.GetCount() > 1)
+			{
+				m_instrument.SetCurSel(1);
+				m_selectedInstrument = static_cast<ModCommand::INSTR>(m_instrument.GetItemData(1));
+			}
 			CheckDlgButton(IDC_PIANOROLL_SNAP, state.snap ? BST_CHECKED : BST_UNCHECKED);
-			CheckDlgButton(IDC_PIANOROLL_CHANNELFILTER, state.showAllChannels ? BST_CHECKED : BST_UNCHECKED);
 			CheckDlgButton(IDC_PIANOROLL_FOLLOWSONG, state.followSong ? BST_CHECKED : BST_UNCHECKED);
 			SelectComboData(m_snapRows, state.snapRows);
 			SetCurrentPattern(state.nPattern);
 		} else if(lParam != -1 && m_sndFile.Patterns.IsValidPat(static_cast<PATTERNINDEX>(lParam & 0xFFFF)))
 		{
+			if(trackerInstrument > 0 && SelectComboData(m_instrument, trackerInstrument))
+				m_selectedInstrument = static_cast<ModCommand::INSTR>(trackerInstrument);
 			SetCurrentPattern(static_cast<PATTERNINDEX>(lParam & 0xFFFF));
 		} else
 		{

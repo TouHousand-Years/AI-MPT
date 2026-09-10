@@ -12,16 +12,14 @@ OPENMPT_NAMESPACE_BEGIN
 class CCtrlPianoRoll final : public CModControlDlg
 {
 private:
-	CComboBox m_pattern, m_channel, m_instrument, m_snapRows;
+	CComboBox m_pattern, m_instrument, m_snapRows;
 	PATTERNINDEX m_currentPattern = 0;
-	CHANNELINDEX m_activeChannel = 0;
 	ModCommand::INSTR m_selectedInstrument = 0;
 
 public:
 	CCtrlPianoRoll(CModControlView &parent, CModDoc &document);
 
 	PATTERNINDEX GetCurrentPattern() const { return m_currentPattern; }
-	CHANNELINDEX GetActiveChannel() const { return m_activeChannel; }
 	ModCommand::INSTR GetSelectedInstrument() const { return m_selectedInstrument; }
 	ROWINDEX GetSnapRows() const;
 	bool SnapEnabled() const { return IsDlgButtonChecked(IDC_PIANOROLL_SNAP) != BST_UNCHECKED; }
@@ -44,9 +42,9 @@ private:
 	bool SelectComboData(CComboBox &combo, DWORD_PTR value);
 	void SyncView();
 	void OnPatternChanged();
-	void OnChannelChanged();
 	void OnInstrumentChanged();
 	void OnViewOptionsChanged();
+	void OnSplitChannels();
 	void OnUndo();
 	void OnRedo();
 	void OnPlay();

@@ -12,6 +12,7 @@
 #include "Notification.h"
 #include "TrackerSettings.h"
 #include "WindowMessages.h"
+#include "../soundlib/mod_specifications.h"
 
 #include <set>
 
@@ -43,12 +44,12 @@ CString NoteLabel(ModCommand::NOTE note)
 	return text;
 }
 
-COLORREF ChannelColour(const CSoundFile &soundFile, CHANNELINDEX channel)
+COLORREF InstrumentColour(ModCommand::INSTR instrument)
 {
-	const COLORREF configured = soundFile.ChnSettings[channel].color;
-	if(configured != ModChannelSettings::INVALID_COLOR) return configured;
-	static constexpr COLORREF fallback[] = {RGB(0x55, 0xB7, 0xE8), RGB(0xF3, 0x9C, 0x3D), RGB(0x87, 0xC5, 0x55), RGB(0xC4, 0x79, 0xD9)};
-	return fallback[channel % std::size(fallback)];
+	static constexpr COLORREF palette[] = {
+		RGB(0x55, 0xB7, 0xE8), RGB(0xF3, 0x9C, 0x3D), RGB(0x87, 0xC5, 0x55), RGB(0xC4, 0x79, 0xD9),
+		RGB(0xE4, 0x68, 0x76), RGB(0x4F, 0xC3, 0xA1), RGB(0xD6, 0xB4, 0x4C), RGB(0x75, 0x8F, 0xDB)};
+	return palette[(instrument ? instrument - 1 : 0) % std::size(palette)];
 }
 
 }  // namespace
@@ -57,6 +58,7 @@ IMPLEMENT_SERIAL(CViewPianoRoll, CModScrollView, 0)
 
 BEGIN_MESSAGE_MAP(CViewPianoRoll, CModScrollView)
 	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONDBLCLK()
 	ON_WM_LBUTTONUP()
 	ON_WM_RBUTTONUP()
 	ON_WM_MOUSEMOVE()
@@ -72,6 +74,7 @@ BEGIN_MESSAGE_MAP(CViewPianoRoll, CModScrollView)
 	ON_COMMAND(ID_EDIT_COPY, &CViewPianoRoll::OnEditCopy)
 	ON_COMMAND(ID_EDIT_PASTE, &CViewPianoRoll::OnEditPaste)
 	ON_COMMAND(ID_EDIT_SELECT_ALL, &CViewPianoRoll::OnEditSelectAll)
+	ON_COMMAND(IDC_PIANOROLL_SPLITCHANNELS, &CViewPianoRoll::OnSplitChannels)
 	ON_MESSAGE(WM_MOD_KEYCOMMAND, &CViewPianoRoll::OnCustomKeyMsg)
 END_MESSAGE_MAP()
 
@@ -170,9 +173,9 @@ void CViewPianoRoll::ToggleSelection(const PianoRollPattern::NoteRef &note)
 		m_selection.push_back(note);
 }
 
-void CViewPianoRoll::Commit(PianoRollPattern::Operation operation)
+bool CViewPianoRoll::Commit(PianoRollPattern::Operation operation)
 {
-	if(!m_model) return;
+	if(!m_model) return false;
 	if(CCtrlPianoRoll *panel = GetPanel()) operation.viewFilter = panel->GetViewFilter();
 	const auto result = m_model->Apply(operation);
 	if(result.applied)
@@ -181,35 +184,48 @@ void CViewPianoRoll::Commit(PianoRollPattern::Operation operation)
 		PruneSelection(Projection());
 		UpdateScrollSize();
 		Invalidate(FALSE);
+		return true;
 	} else if(!result.reason.IsEmpty())
 	{
 		UpdateIndicator(result.reason);
 	}
+	return false;
 }
 
 void CViewPianoRoll::DrawNote(CDC &dc, const PianoRollPattern::Note &note, const PianoRollPattern::Projection &projection, const CPoint &delta) const
 {
 	CRect rect = NoteRect(note, projection);
 	rect.OffsetRect(delta.x * m_rowWidth, -delta.y * m_keyHeight);
-	const COLORREF colour = ChannelColour(GetDocument()->GetSoundFile(), note.id.channel);
+	const COLORREF colour = InstrumentColour(note.instrument);
 	dc.FillSolidRect(rect, colour);
-	const bool active = GetPanel() && note.id.channel == GetPanel()->GetActiveChannel();
-	dc.Draw3dRect(rect, active ? RGB(255, 255, 255) : RGB(20, 20, 20), RGB(20, 20, 20));
+	dc.Draw3dRect(rect, RGB(245, 245, 248), RGB(28, 28, 32));
 	if(rect.Width() > 34)
 	{
-		CString label;
-		label.Format(_T("%s  Ch %u"), NoteLabel(note.pitch).GetString(), note.id.channel + 1);
+		CString label = GetDocument()->GetPatternViewInstrumentName(note.instrument);
+		const auto &specs = GetDocument()->GetSoundFile().GetModSpecifications();
+		if(note.volumeCommand != VOLCMD_NONE)
+			label.AppendFormat(_T("  %c%02X"), specs.GetVolEffectLetter(note.volumeCommand), note.volumeParameter);
+		if(note.effectCommand != CMD_NONE)
+			label.AppendFormat(_T("  %c%02X"), specs.GetEffectLetter(note.effectCommand), note.effectParameter);
 		dc.SetBkMode(TRANSPARENT);
-		dc.SetTextColor(RGB(20, 20, 20));
+		const int luminance = GetRValue(colour) * 299 + GetGValue(colour) * 587 + GetBValue(colour) * 114;
+		dc.SetTextColor(luminance >= 145000 ? RGB(20, 20, 22) : RGB(250, 250, 252));
 		CRect labelRect = rect;
 		labelRect.DeflateRect(3, 0);
 		dc.DrawText(label, labelRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 	}
 	if(IsSelected(note.id))
 	{
+		// A high-contrast double inner stroke stays visible against every
+		// instrument colour and does not change the note's apparent duration.
 		CRect selection = rect;
-		selection.InflateRect(2, 1);
-		dc.Draw3dRect(selection, RGB(255, 255, 255), RGB(255, 255, 255));
+		selection.DeflateRect(2, 2);
+		if(selection.Width() > 4 && selection.Height() > 4)
+		{
+			dc.Draw3dRect(selection, RGB(255, 255, 255), RGB(255, 255, 255));
+			selection.DeflateRect(1, 1);
+			dc.Draw3dRect(selection, RGB(35, 35, 40), RGB(35, 35, 40));
+		}
 	}
 }
 
@@ -292,6 +308,18 @@ void CViewPianoRoll::OnDraw(CDC *dc)
 			const int pitchDelta = int(PitchAt(m_dragNow, projection)) - int(PitchAt(m_dragStart, projection));
 			for(const auto &note : projection.notes)
 				if(IsSelected(note.id)) DrawNote(buffer, note, projection, CPoint(rowDelta, pitchDelta));
+		}
+		if(m_dragging && m_resizing)
+		{
+			for(const auto &note : projection.notes) if(note.id == m_dragNote)
+			{
+				auto preview = note;
+				if(m_resizeLeft)
+					preview.id.row = std::min<ROWINDEX>(RowAt(m_dragNow, projection), static_cast<ROWINDEX>(preview.endRow - 1));
+				else
+					preview.endRow = std::max<ROWINDEX>(static_cast<ROWINDEX>(preview.id.row + 1), static_cast<ROWINDEX>(RowAt(m_dragNow, projection) + 1));
+				DrawNote(buffer, preview, projection);
+			}
 		}
 		DrawSelectionBox(buffer);
 		buffer.RestoreDC(saved);
@@ -403,20 +431,49 @@ void CViewPianoRoll::OnLButtonDown(UINT flags, CPoint point)
 		SetCapture();
 		return;
 	}
+	// Some host window classes do not carry CS_DBLCLKS, in which case Windows
+	// sends two button-down messages instead of WM_LBUTTONDBLCLK. Accept both
+	// forms so empty-cell insertion is independent of the containing view class.
+	const DWORD clickTime = GetMessageTime();
+	const CSize doubleClickSize(GetSystemMetrics(SM_CXDOUBLECLK), GetSystemMetrics(SM_CYDOUBLECLK));
+	if(m_lastEmptyClickTime != 0 && clickTime - m_lastEmptyClickTime <= GetDoubleClickTime()
+		&& std::abs(point.x - m_lastEmptyClickPoint.x) <= doubleClickSize.cx
+		&& std::abs(point.y - m_lastEmptyClickPoint.y) <= doubleClickSize.cy)
+	{
+		m_lastEmptyClickTime = 0;
+		InsertAtPoint(point);
+		return;
+	}
+	m_lastEmptyClickTime = clickTime;
+	m_lastEmptyClickPoint = point;
+	Invalidate(FALSE);
+}
+
+bool CViewPianoRoll::InsertAtPoint(CPoint point)
+{
+	const auto projection = Projection();
+	if(point.x < KeyboardWidth || point.y < RulerHeight || HitNote(point, projection)) return false;
 	CCtrlPianoRoll *panel = GetPanel();
 	if(!panel || panel->GetSelectedInstrument() == 0)
 	{
-		UpdateIndicator(_T("Choose an existing instrument or sample before drawing a note."));
-		return;
+		UpdateIndicator(_T("Choose an existing instrument or sample before adding a note."));
+		return false;
 	}
 	PianoRollPattern::Operation operation;
 	operation.type = PianoRollPattern::OperationType::Insert;
 	operation.pattern = m_pattern;
-	operation.row = m_cursorRow;
-	operation.channel = panel->GetActiveChannel();
-	operation.pitch = m_cursorPitch;
+	operation.row = RowAt(point, projection);
+	operation.pitch = PitchAt(point, projection);
 	operation.instrument = panel->GetSelectedInstrument();
-	Commit(std::move(operation));
+	operation.length = panel->SnapEnabled() ? panel->GetSnapRows() : 1;
+	return Commit(std::move(operation));
+
+}
+
+void CViewPianoRoll::OnLButtonDblClk(UINT, CPoint point)
+{
+	m_lastEmptyClickTime = 0;
+	InsertAtPoint(point);
 }
 
 void CViewPianoRoll::OnLButtonUp(UINT, CPoint point)
@@ -542,7 +599,8 @@ void CViewPianoRoll::CopySelection(bool cut)
 	g_pianoRollClipboard.clear();
 	for(const auto &note : projection.notes) if(IsSelected(note.id))
 		g_pianoRollClipboard.push_back({static_cast<ROWINDEX>(note.id.row - firstRow), int(note.pitch) - firstPitch,
-			static_cast<CHANNELINDEX>(note.id.channel - firstChannel), note.instrument, note.volume});
+			static_cast<CHANNELINDEX>(note.id.channel - firstChannel), note.instrument, note.volume,
+			static_cast<ROWINDEX>(note.endRow - note.id.row)});
 	if(cut)
 	{
 		PianoRollPattern::Operation operation;
@@ -563,7 +621,7 @@ void CViewPianoRoll::Paste()
 	operation.type = PianoRollPattern::OperationType::Paste;
 	operation.pattern = m_pattern;
 	operation.row = m_cursorRow;
-	operation.channel = panel->GetActiveChannel();
+	operation.channel = 0;
 	operation.pitch = m_cursorPitch;
 	operation.clipboard = g_pianoRollClipboard;
 	Commit(std::move(operation));
@@ -600,6 +658,14 @@ void CViewPianoRoll::OnEditCut() { CopySelection(true); }
 void CViewPianoRoll::OnEditCopy() { CopySelection(false); }
 void CViewPianoRoll::OnEditPaste() { Paste(); }
 void CViewPianoRoll::OnEditSelectAll() { SelectAll(); }
+
+void CViewPianoRoll::OnSplitChannels()
+{
+	PianoRollPattern::Operation operation;
+	operation.type = PianoRollPattern::OperationType::NormalizeChannels;
+	operation.pattern = m_pattern;
+	Commit(std::move(operation));
+}
 
 LRESULT CViewPianoRoll::OnCustomKeyMsg(WPARAM command, LPARAM)
 {
@@ -660,6 +726,15 @@ void CViewPianoRoll::OnKeyDown(UINT key, UINT, UINT)
 
 BOOL CViewPianoRoll::PreTranslateMessage(MSG *message)
 {
+	if(message && message->hwnd == m_hWnd && message->message == WM_LBUTTONDBLCLK)
+	{
+		// Consume the gesture before CScrollView or its parent can reinterpret it.
+		// lParam is in this view's client coordinates for mouse messages.
+		const CPoint point(static_cast<short>(LOWORD(message->lParam)), static_cast<short>(HIWORD(message->lParam)));
+		m_lastEmptyClickTime = 0;
+		InsertAtPoint(point);
+		return TRUE;
+	}
 	if(message && message->message == WM_KEYUP && m_previewPitch != NOTE_NONE)
 	{
 		StopPreview();
@@ -766,7 +841,7 @@ LRESULT CViewPianoRoll::OnModViewMsg(WPARAM wParam, LPARAM lParam)
 			state->keyZoom = m_keyHeight;
 			if(CCtrlPianoRoll *panel = GetPanel())
 			{
-				state->activeChannel = panel->GetActiveChannel();
+				state->activeChannel = 0;
 				state->instrument = panel->GetSelectedInstrument();
 				state->snap = panel->SnapEnabled();
 				state->showAllChannels = panel->GetViewFilter().visibleChannels.empty();

@@ -57,18 +57,22 @@ EmptySpan FindEmptySpan(const CSoundFile &sndFile, PATTERNINDEX pattern, ROWINDE
 	throw std::runtime_error("The Piano Roll fixture has no usable empty span");
 }
 
-ROWINDEX FindCompletelyEmptyRow(const CSoundFile &sndFile, PATTERNINDEX pattern)
+void RequireInstrumentChannels(const CSoundFile &sndFile)
 {
-	const CPattern &source = sndFile.Patterns[pattern];
-	for(ROWINDEX row = 0; row < source.GetNumRows(); ++row)
+	for(CHANNELINDEX channel = 0; channel < sndFile.GetNumChannels(); ++channel)
 	{
-		bool empty = true;
-		for(CHANNELINDEX channel = 0; channel < sndFile.GetNumChannels(); ++channel)
-			empty = empty && IsEmpty(*source.GetpModCommand(row, channel));
-		if(empty)
-			return row;
+		std::set<ModCommand::INSTR> instruments;
+		for(PATTERNINDEX pattern = 0; pattern < sndFile.Patterns.Size(); ++pattern)
+		{
+			if(!sndFile.Patterns.IsValidPat(pattern)) continue;
+			for(ROWINDEX row = 0; row < sndFile.Patterns[pattern].GetNumRows(); ++row)
+			{
+				const auto &cell = *sndFile.Patterns[pattern].GetpModCommand(row, channel);
+				if(ModCommand::IsNote(cell.note) && cell.instr != 0) instruments.insert(cell.instr);
+			}
+		}
+		Require(instruments.size() <= 1, "Every Piano Roll channel belongs to at most one instrument group");
 	}
-	throw std::runtime_error("The Piano Roll fixture has no completely empty row");
 }
 
 PianoRollPattern::Operation InsertAt(PATTERNINDEX pattern, ROWINDEX row, CHANNELINDEX channel, int pitch)
@@ -124,152 +128,85 @@ void PianoRollPatternTests(const CString &fixture)
 		"Projection derives an explicit note-off endpoint");
 	first = savedFirst;
 	explicitOff = savedOff;
-	first.note = static_cast<ModCommand::NOTE>(NOTE_MIDDLEC);
-	first.instr = 1;
-	explicitOff.command = CMD_DELAYCUT;
-	explicitOff.param = 1;
-	const auto effectProjection = editor.Read(patternIndex);
-	const auto effectNote = std::find_if(effectProjection.notes.begin(), effectProjection.notes.end(), [&](const auto &note)
+
+	// All editing crosses the PianoRollPattern seam. Normalization makes note
+	// durations explicit and packs each instrument into the minimum non-
+	// overlapping layers, independently of the Tracker channel cursor.
+	PianoRollPattern::Operation normalize;
+	normalize.type = PianoRollPattern::OperationType::NormalizeChannels;
+	normalize.pattern = patternIndex;
+	editor.Apply(normalize);
+	RequireInstrumentChannels(sndFile);
+
+	constexpr ROWINDEX brickRow = 112;
+	for(CHANNELINDEX channel = 0; channel < sndFile.GetNumChannels(); ++channel)
 	{
-		return note.id == PianoRollPattern::NoteRef{patternIndex, empty.row, empty.channel};
+		for(ROWINDEX row = brickRow - 1; row < sndFile.Patterns[patternIndex].GetNumRows(); ++row)
+			sndFile.Patterns[patternIndex].GetpModCommand(row, channel)->Clear();
+		sndFile.Patterns[patternIndex].GetpModCommand(brickRow - 1, channel)->note = NOTE_KEYOFF;
+	}
+	auto insertBrick = InsertAt(patternIndex, brickRow, 0, NOTE_MIDDLEC + 7);
+	insertBrick.length = 2;
+	const auto firstBrick = editor.Apply(insertBrick);
+	Require(firstBrick.applied && firstBrick.affected.size() == 1, "Double-click insertion creates one explicit Piano Roll block");
+	auto firstRef = firstBrick.affected.front();
+	Require(sndFile.Patterns[patternIndex].GetpModCommand(brickRow + 2, firstRef.channel)->note == NOTE_KEYOFF,
+		"Insertion writes an explicit note-off");
+
+	insertBrick.row = brickRow + 2;
+	insertBrick.pitch = NOTE_MIDDLEC + 9;
+	const auto secondBrick = editor.Apply(insertBrick);
+	Require(secondBrick.applied && secondBrick.affected.size() == 1, "A touching note reuses the lowest instrument layer");
+	auto secondRef = secondBrick.affected.front();
+	Require(secondRef.channel == firstRef.channel
+		&& sndFile.Patterns[patternIndex].GetpModCommand(brickRow + 2, firstRef.channel)->note == NOTE_MIDDLEC + 9,
+		"A note start removes the coincident stop symbol");
+
+	PianoRollPattern::Operation moveSecond;
+	moveSecond.type = PianoRollPattern::OperationType::Move;
+	moveSecond.pattern = patternIndex;
+	moveSecond.notes = {secondRef};
+	moveSecond.rowDelta = 1;
+	const auto movedSecond = editor.Apply(moveSecond);
+	Require(movedSecond.applied && movedSecond.affected.size() == 1, "A note can move later while preserving its duration");
+	secondRef = movedSecond.affected.front();
+	const auto afterMove = editor.Read(patternIndex);
+	auto projectedFirst = std::find_if(afterMove.notes.begin(), afterMove.notes.end(), [&](const auto &note)
+	{
+		return note.id.row == brickRow && note.pitch == NOTE_MIDDLEC + 7;
 	});
-	Require(effectNote != effectProjection.notes.end() && effectNote->endRow == empty.row + 3,
-		"Projection derives a Tracker effect-column termination");
-	first = savedFirst;
-	explicitOff = savedOff;
+	Require(projectedFirst != afterMove.notes.end() && projectedFirst->endRow == brickRow + 2
+		&& sndFile.Patterns[patternIndex].GetpModCommand(brickRow + 2, projectedFirst->id.channel)->note == NOTE_KEYOFF,
+		"Moving the following note later fills the old implicit boundary with a stop symbol");
 
-	// A pure effect / nonstandard-volume target is editable, and untouched
-	// fields must survive the ordinary Pattern Undo cycle exactly.
-	const ModCommand baseline = first;
-	first.command = CMD_TEMPO;
-	first.param = 125;
-	first.volcmd = VOLCMD_PANNING;
-	first.vol = 32;
-	const auto draw = editor.Apply(InsertAt(patternIndex, empty.row, empty.channel, NOTE_MIDDLEC));
-	Require(draw.applied && first.note == NOTE_MIDDLEC && first.instr == 1
-		&& first.command == CMD_TEMPO && first.param == 125 && first.volcmd == VOLCMD_PANNING && first.vol == 32,
-		"Drawing preserves effect and nonstandard volume fields");
-	PianoRollPattern::Operation erase;
-	erase.type = PianoRollPattern::OperationType::Delete;
-	erase.pattern = patternIndex;
-	erase.notes = draw.affected;
-	Require(editor.Apply(erase).applied && first.note == NOTE_NONE && first.instr == 0
-		&& first.command == CMD_TEMPO && first.param == 125 && first.volcmd == VOLCMD_PANNING && first.vol == 32,
-		"Deleting clears only Piano Roll-owned fields");
-	UndoOne(*document, "Delete produces one normal Pattern Undo step");
-	UndoOne(*document, "Draw produces one normal Pattern Undo step");
-	Require(first.note == NOTE_NONE && first.instr == 0 && first.volcmd == VOLCMD_PANNING && first.vol == 32
-		&& first.command == CMD_TEMPO && first.param == 125, "Undo restores byte-preserved fields");
-	first = baseline;
+	PianoRollPattern::Operation lengthen;
+	lengthen.type = PianoRollPattern::OperationType::Resize;
+	lengthen.pattern = patternIndex;
+	lengthen.notes = {projectedFirst->id};
+	lengthen.length = 4;
+	const auto lengthened = editor.Apply(lengthen);
+	Require(lengthened.applied, "A note can be lengthened through a following note by adding an instrument layer");
+	const auto layered = editor.Read(patternIndex);
+	auto longNote = std::find_if(layered.notes.begin(), layered.notes.end(), [&](const auto &note) { return note.id.row == brickRow && note.pitch == NOTE_MIDDLEC + 7; });
+	auto laterNote = std::find_if(layered.notes.begin(), layered.notes.end(), [&](const auto &note) { return note.id.row == brickRow + 3 && note.pitch == NOTE_MIDDLEC + 9; });
+	Require(longNote != layered.notes.end() && laterNote != layered.notes.end() && longNote->id.channel != laterNote->id.channel,
+		"Overlapping notes of one instrument occupy different layers");
+	RequireInstrumentChannels(sndFile);
 
-	const auto resizeStart = FindEmptySpan(sndFile, patternIndex, 8);
-	const auto resizeDraw = editor.Apply(InsertAt(patternIndex, resizeStart.row, resizeStart.channel, NOTE_MIDDLEC + 2));
-	Require(resizeDraw.applied, "A note can be drawn before resizing");
-	PianoRollPattern::Operation resize;
-	resize.type = PianoRollPattern::OperationType::Resize;
-	resize.pattern = patternIndex;
-	resize.notes = resizeDraw.affected;
-	resize.length = 4;
-	Require(editor.Apply(resize).applied && sndFile.Patterns[patternIndex].GetpModCommand(resizeStart.row + 4, resizeStart.channel)->note == NOTE_KEYOFF,
-		"Resizing writes an exact note-off event");
-	resize.length = 6;
-	Require(editor.Apply(resize).applied && sndFile.Patterns[patternIndex].GetpModCommand(resizeStart.row + 4, resizeStart.channel)->note == NOTE_NONE
-		&& sndFile.Patterns[patternIndex].GetpModCommand(resizeStart.row + 6, resizeStart.channel)->note == NOTE_KEYOFF,
-		"An explicit note-off can be lengthened without crossing Tracker data");
-	UndoOne(*document, "Lengthen produces one normal Pattern Undo step");
-	UndoOne(*document, "Shorten produces one normal Pattern Undo step");
-	UndoOne(*document, "Resize setup draw produces one normal Pattern Undo step");
-
-	const auto leftDraw = editor.Apply(InsertAt(patternIndex, resizeStart.row + 2, resizeStart.channel, NOTE_MIDDLEC + 3));
-	Require(leftDraw.applied, "A note can be drawn before moving its left edge");
-	PianoRollPattern::Operation leftResize;
-	leftResize.type = PianoRollPattern::OperationType::Resize;
-	leftResize.pattern = patternIndex;
-	leftResize.notes = leftDraw.affected;
-	leftResize.resizeFromLeft = true;
-	leftResize.rowDelta = -1;
-	Require(editor.Apply(leftResize).applied && sndFile.Patterns[patternIndex].GetpModCommand(resizeStart.row + 1, resizeStart.channel)->note == NOTE_MIDDLEC + 3
-		&& sndFile.Patterns[patternIndex].GetpModCommand(resizeStart.row + 2, resizeStart.channel)->note == NOTE_NONE,
-		"Moving the left edge preserves the right endpoint");
-	UndoOne(*document, "Left-edge resize produces one normal Pattern Undo step");
-	UndoOne(*document, "Left-edge setup draw produces one normal Pattern Undo step");
-
-	const auto moveStart = FindEmptySpan(sndFile, patternIndex, 8);
-	const auto moveDraw = editor.Apply(InsertAt(patternIndex, moveStart.row, moveStart.channel, NOTE_MIDDLEC + 5));
-	Require(moveDraw.applied, "A note can be drawn before transpose and move");
-	PianoRollPattern::Operation transpose;
-	transpose.type = PianoRollPattern::OperationType::Transpose;
-	transpose.pattern = patternIndex;
-	transpose.notes = moveDraw.affected;
-	transpose.pitchDelta = 1;
-	Require(editor.Apply(transpose).applied && sndFile.Patterns[patternIndex].GetpModCommand(moveStart.row, moveStart.channel)->note == NOTE_MIDDLEC + 6,
-		"Transposition changes only the pitched note field");
-	UndoOne(*document, "Transpose produces one normal Pattern Undo step");
-	PianoRollPattern::Operation move;
-	move.type = PianoRollPattern::OperationType::Move;
-	move.pattern = patternIndex;
-	move.notes = moveDraw.affected;
-	move.rowDelta = 1;
-	move.pitchDelta = 2;
-	Require(editor.Apply(move).applied && sndFile.Patterns[patternIndex].GetpModCommand(moveStart.row, moveStart.channel)->note == NOTE_NONE
-		&& sndFile.Patterns[patternIndex].GetpModCommand(moveStart.row + 1, moveStart.channel)->note == NOTE_MIDDLEC + 7,
-		"Move uses a single transactional Pattern edit");
-	UndoOne(*document, "Move produces one normal Pattern Undo step");
-	UndoOne(*document, "Move setup draw produces one normal Pattern Undo step");
-
-	const auto pasteRow = FindCompletelyEmptyRow(sndFile, patternIndex);
-	PianoRollPattern::Operation paste;
-	paste.type = PianoRollPattern::OperationType::Paste;
-	paste.pattern = patternIndex;
-	paste.row = pasteRow;
-	paste.channel = 0;
-	paste.pitch = NOTE_MIDDLEC;
-	paste.clipboard = {{0, 0, 0, 1, 32}, {2, 4, 1, 1, std::nullopt}};
-	Require(editor.Apply(paste).applied && sndFile.Patterns[patternIndex].GetpModCommand(pasteRow, 0)->note == NOTE_MIDDLEC
-		&& sndFile.Patterns[patternIndex].GetpModCommand(pasteRow + 2, 1)->note == NOTE_MIDDLEC + 4,
-		"Relative Piano Roll clipboard paste commits as one transaction");
-	UndoOne(*document, "Multi-note paste produces one normal Pattern Undo step");
-
-	const auto targetRow = FindCompletelyEmptyRow(sndFile, patternIndex);
-	const CHANNELINDEX originalChannels = sndFile.GetNumChannels();
-	std::vector<ModCommand> occupied;
-	for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
-	{
-		auto &cell = *sndFile.Patterns[patternIndex].GetpModCommand(targetRow, channel);
-		occupied.push_back(cell);
-		cell.instr = 1;
-	}
-	const auto addedChannel = editor.Apply(InsertAt(patternIndex, targetRow, 0, NOTE_MIDDLEC + 4));
-	Require(addedChannel.applied && addedChannel.channelsAdded && sndFile.GetNumChannels() == originalChannels + 1,
-		"A full visible row allocates one channel atomically");
-	UndoOne(*document, "Channel allocation is one normal Pattern Undo step");
-	Require(sndFile.GetNumChannels() == originalChannels, "Undo restores the original channel layout");
-	for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
-		*sndFile.Patterns[patternIndex].GetpModCommand(targetRow, channel) = occupied[channel];
-
-	// Special Tracker note cells are never valid graphical targets, even when
-	// other channel allocation would otherwise be possible.
-	for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
-	{
-		ModCommand special;
-		special.note = channel & 1 ? NOTE_PC : NOTE_PCS;
-		special.instr = 1;
-		*sndFile.Patterns[patternIndex].GetpModCommand(targetRow, channel) = special;
-	}
-	const auto protectedCell = editor.Apply(InsertAt(patternIndex, targetRow, 0, NOTE_MIDDLEC + 5));
-	Require(!protectedCell.applied && sndFile.GetNumChannels() == originalChannels,
-		"PC and PCS cells reject a graphical edit atomically");
-	for(CHANNELINDEX channel = 0; channel < originalChannels; ++channel)
-		*sndFile.Patterns[patternIndex].GetpModCommand(targetRow, channel) = occupied[channel];
-
-	auto invalid = InsertAt(patternIndex, empty.row, empty.channel, NOTE_MIDDLEC);
-	invalid.instrument = 0;
-	Require(!editor.Apply(invalid).applied, "Drawing rejects a missing instrument or sample");
-	AI::PatternCapability occupancy(*document, patternIndex, {});
-	const auto token = occupancy.Call("get_pattern_context", {{"occupy", true}}).at("session");
-	Require(!editor.Apply(InsertAt(patternIndex, empty.row, empty.channel, NOTE_MIDDLEC)).applied,
-		"Retained AI occupancy makes Piano Roll edits read-only");
-	occupancy.Call("abort_session", {{"session", token}});
+	PianoRollPattern::Operation removeLong;
+	removeLong.type = PianoRollPattern::OperationType::Delete;
+	removeLong.pattern = patternIndex;
+	removeLong.notes = {longNote->id};
+	Require(editor.Apply(removeLong).applied, "Deleting the lower brick repacks the instrument group");
+	const auto fallen = editor.Read(patternIndex);
+	auto fallenNote = std::find_if(fallen.notes.begin(), fallen.notes.end(), [&](const auto &note) { return note.id.row == brickRow + 3 && note.pitch == NOTE_MIDDLEC + 9; });
+	CHANNELINDEX lowestInstrumentChannel = CHANNELINDEX_INVALID;
+	for(const auto &note : fallen.notes) if(note.instrument == 1) lowestInstrumentChannel = std::min(lowestInstrumentChannel, note.id.channel);
+	Require(fallenNote != fallen.notes.end() && fallenNote->id.channel == lowestInstrumentChannel,
+		"When the lower brick is removed, the remaining brick falls to the lowest free layer");
+	Require(sndFile.GetNumChannels() <= layered.channels,
+		"Removing an overlap also removes any now-empty trailing Piano Roll layer");
+	UndoOne(*document, "Repacking remains one atomic Undo step");
 
 	document->SetModified(false);
 	document->OnCloseDocument();

@@ -46,6 +46,10 @@ public:
 		ROWINDEX endRow = 0;  // exclusive; derived from Tracker termination data
 		ModCommand::INSTR instrument = 0;
 		std::optional<ModCommand::VOL> volume;
+		ModCommand::VOLCMD volumeCommand = VOLCMD_NONE;
+		ModCommand::VOL volumeParameter = 0;
+		ModCommand::COMMAND effectCommand = CMD_NONE;
+		ModCommand::PARAM effectParameter = 0;
 	};
 
 	struct Projection
@@ -71,6 +75,7 @@ public:
 		CHANNELINDEX relativeChannel = 0;
 		ModCommand::INSTR instrument = 0;
 		std::optional<ModCommand::VOL> volume;
+		ROWINDEX length = 1;
 	};
 
 	enum class OperationType : uint8
@@ -81,6 +86,7 @@ public:
 		Transpose,
 		Resize,
 		Paste,
+		NormalizeChannels,
 	};
 
 	struct Operation
