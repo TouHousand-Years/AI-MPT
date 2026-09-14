@@ -216,7 +216,11 @@ and manual navigation in OpenMPT never rebinds it. Ranges and channels are also
 zero-based.
 Segment entries use absolute row indices with all six raw cell fields; omitted
 rows represent empty desired cells. The app alone validates musical semantics,
-format constraints, preservation and envelope approvals.
+format constraints, preservation and envelope approvals. Score Context's
+`format.volume_commands` and `format.effect_commands` arrays publish every
+command ID that can be written in the bound module format together with its
+parameter range. Both columns can be created, changed, and cleared; raw values
+that are unsupported by the current format remain readable and may be preserved.
 
 An expansion or switch request may remain blocked on the pipe while the app's
 non-modal UI waits for its human decision. The app-internal `pending_approval`

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "AIPattern.h"
 #include "AICommandNames.h"
+#include "EffectInfo.h"
 #include "Moddoc.h"
 #include "UpdateHints.h"
 #include "../soundlib/mod_specifications.h"
@@ -198,6 +199,23 @@ Json PatternCapability::ContextFor(PATTERNINDEX patternIndex, ROWINDEX rowCount,
 	for(SAMPLEINDEX i = 1; i <= sf.GetNumSamples(); ++i)
 		samples.push_back({{"id", i}, {"name", Utf8(mpt::ToUnicode(sf.GetCharsetInternal(), sf.GetSampleName(i)))}, {"frames", sf.GetSample(i).nLength}});
 	const auto &spec = sf.GetModSpecifications();
+	const EffectInfo effectInfo(sf);
+	Json volumeCommands = Json::array({{{"id", VOLCMD_NONE}, {"name", SemanticName(VOLCMD_NONE)}, {"parameter_min", 0}, {"parameter_max", 0}}});
+	for(int command = VOLCMD_NONE + 1; command < MAX_VOLCMDS; ++command)
+	{
+		const auto volcmd = static_cast<ModCommand::VOLCMD>(command);
+		if(!spec.HasVolCommand(volcmd)) continue;
+		ModCommand::VOL minimum = 0, maximum = 0;
+		const auto index = effectInfo.GetIndexFromVolCmd(volcmd);
+		if(index < 0 || !effectInfo.GetVolCmdInfo(static_cast<UINT>(index), nullptr, &minimum, &maximum)) continue;
+		volumeCommands.push_back({{"id", command}, {"name", SemanticName(volcmd)}, {"parameter_min", minimum}, {"parameter_max", maximum}});
+	}
+	Json effectCommands = Json::array({{{"id", CMD_NONE}, {"name", SemanticName(CMD_NONE)}, {"parameter_min", 0}, {"parameter_max", 0}}});
+	for(int command = CMD_NONE + 1; command < MAX_EFFECTS; ++command)
+	{
+		const auto effect = static_cast<ModCommand::COMMAND>(command);
+		if(spec.HasCommand(effect)) effectCommands.push_back({{"id", command}, {"name", SemanticName(effect)}, {"parameter_min", 0}, {"parameter_max", 255}});
+	}
 	const auto &pattern = sf.Patterns[patternIndex];
 	return {{"pattern", patternIndex}, {"rows", rowCount}, {"channels", channelCount}, {"cells", sparse},
 		{"range", {{"first_row", row}, {"row_count", rows}, {"first_channel", channel}, {"channel_count", channels}}},
@@ -205,7 +223,8 @@ Json PatternCapability::ContextFor(PATTERNINDEX patternIndex, ROWINDEX rowCount,
 			{"tempo_mode", int(sf.m_nTempoMode)}, {"rows_per_beat", pattern.GetOverrideSignature() ? pattern.GetRowsPerBeat() : sf.m_nDefaultRowsPerBeat},
 			{"rows_per_measure", pattern.GetOverrideSignature() ? pattern.GetRowsPerMeasure() : sf.m_nDefaultRowsPerMeasure}}},
 		{"format", {{"name", spec.fileExtension}, {"note_min", spec.noteMin}, {"note_max", spec.noteMax}, {"note_off", spec.hasNoteOff},
-			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? MaxVolume : 0}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
+			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? MaxVolume : 0}, {"volume_commands", std::move(volumeCommands)},
+			{"effect_commands", std::move(effectCommands)}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
 		{"instruments", instruments}, {"samples", samples}};
 }
 
@@ -357,6 +376,7 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 {
 	const auto &sf = m_doc.GetSoundFile();
 	const auto &spec = sf.GetModSpecifications();
+	const EffectInfo effectInfo(sf);
 	auto error = [&](const char *field, int value, const char *reason)
 	{
 		auto result = Failure("validationFailure", reason);
@@ -368,7 +388,8 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 	if(SameRaw(before, after)) return {{"ok", true}};
 	if(before.IsPcNote()) return error("note", after.note, "PC/PCS cells must be preserved byte-for-byte");
 	const bool supportedBefore = before.note == NOTE_NONE || before.IsNote() || before.note == NOTE_KEYOFF;
-	if(!supportedBefore) return error("note", after.note, "Preserve unsupported special-note cells byte-for-byte");
+	if(!supportedBefore && (after.note != before.note || after.instr != before.instr))
+		return error("note", after.note, "Preserve the note and instrument of unsupported special-note cells");
 	if(after.note != before.note)
 	{
 		const bool validNote = after.note == NOTE_NONE || (after.IsNote() && spec.HasNote(after.note)) || (after.note == NOTE_KEYOFF && spec.hasNoteOff);
@@ -376,15 +397,30 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 	}
 	if(after.instr != before.instr && after.instr && (sf.GetNumInstruments() ? (after.instr > sf.GetNumInstruments() || !sf.Instruments[after.instr]) : after.instr > sf.GetNumSamples()))
 		return error("instrument", after.instr, "Instrument/sample reference does not exist");
-	if(after.command != before.command || after.param != before.param) return error("effect_command", after.command, "Preserve effect command and parameter exactly");
-	if(before.volcmd != VOLCMD_NONE && before.volcmd != VOLCMD_VOLUME)
+	if(after.command != before.command || after.param != before.param)
 	{
-		if(after.volcmd != before.volcmd || after.vol != before.vol) return error("volume_command", after.volcmd, "Preserve unsupported volume commands exactly");
-	} else if(after.volcmd != before.volcmd || after.vol != before.vol)
+		if(after.command == CMD_NONE)
+		{
+			if(after.param != 0) return error("effect_parameter", after.param, "An empty effect column must have parameter zero");
+		} else if(!spec.HasCommand(after.command))
+		{
+			return error("effect_command", after.command, "Effect command is not supported by the module format");
+		}
+	}
+	if(after.volcmd != before.volcmd || after.vol != before.vol)
 	{
-		if(after.volcmd != VOLCMD_NONE && after.volcmd != VOLCMD_VOLUME) return error("volume_command", after.volcmd, "Only ordinary volume values can be written");
-		if(after.volcmd == VOLCMD_VOLUME && (!spec.HasVolCommand(VOLCMD_VOLUME) || after.vol > MaxVolume)) return error("volume", after.vol, "Volume must be supported and between 0 and 64");
-		if(after.volcmd == VOLCMD_NONE && after.vol != 0) return error("volume", after.vol, "An empty volume column must have value zero");
+		if(after.volcmd == VOLCMD_NONE)
+		{
+			if(after.vol != 0) return error("volume", after.vol, "An empty volume column must have parameter zero");
+		} else
+		{
+			if(!spec.HasVolCommand(after.volcmd)) return error("volume_command", after.volcmd, "Volume command is not supported by the module format");
+			ModCommand::VOL minimum = 0, maximum = 0;
+			const auto index = effectInfo.GetIndexFromVolCmd(after.volcmd);
+			if(index < 0 || !effectInfo.GetVolCmdInfo(static_cast<UINT>(index), nullptr, &minimum, &maximum))
+				return error("volume_command", after.volcmd, "Volume command is not editable in the module format");
+			if(after.vol < minimum || after.vol > maximum) return error("volume", after.vol, "Volume command parameter is outside the format-supported range");
+		}
 	}
 	return {{"ok", true}};
 }

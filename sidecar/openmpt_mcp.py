@@ -30,7 +30,7 @@ TOOLS = [
     {"name": "get_pattern_context", "description": "Read sparse semantic Score Context of the bound Pattern. Defaults to the candidate and the whole Pattern. Reads can exceed the write envelope. occupy=true retains occupancy. " + ENDING,
      "inputSchema": object_schema({"session": SESSION, "occupy": {"type": "boolean"},
                                     "baseline": {"type": "boolean"}, "range": RANGE})},
-    {"name": "replace_pattern_segment", "description": "Replace one contiguous segment of one channel in the private candidate. Indices are zero-based; omitted rows become complete empty cells. Preserve all unsupported raw fields exactly. Expansion can wait for human approval. " + ENDING,
+    {"name": "replace_pattern_segment", "description": "Replace one contiguous segment of one channel in the private candidate. Indices are zero-based; omitted rows become complete empty cells. All format-supported volume and effect commands are editable; use the command IDs and parameter ranges published by get_pattern_context. Preserve unsupported raw values unless replacing them with a supported value. Expansion can wait for human approval. " + ENDING,
      "inputSchema": object_schema({"session": SESSION, "channel": INTEGER, "first_row": INTEGER,
                                     "row_count": {"type": "integer", "minimum": 1},
                                     "cells": {"type": "array", "items": object_schema({"row": INTEGER, "cell": CELL}, ("row", "cell"))}},

@@ -2,6 +2,14 @@
 
 Request a change of the bound Pattern, or authenticate one while a session is retained. The capability binds one Pattern at a time.
 
+## Pattern switching
+
+The capability binds exactly one Pattern at a time. Read the Sequence order first and use an existing zero-based Pattern index as the switch target. Manual navigation in OpenMPT changes only the human's view; it never changes the Agent binding.
+
+To edit another Pattern in the same document, call `switch_pattern`. With no retained session, an approved request establishes a new session. With a retained session, pass its exact token; approval captures the target from scratch and returns a fresh token, so discard the old token. Read the returned `status` (`switched`, `unchanged`, or a typed rejection) before continuing.
+
+Each switch grants the target Pattern's full rows and channels, but proposals remain single-Pattern. Finish the current candidate with `handoff_for_review` or `abort_session` before switching again. For multi-Pattern work, complete and verify one Pattern, end its session, switch, then acquire and verify the next Pattern independently.
+
 ## Arguments
 
 ```json

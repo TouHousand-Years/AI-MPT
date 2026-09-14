@@ -32,7 +32,7 @@ Replace one contiguous row segment in one channel of the retained private candid
 
 1. Read the current candidate over the exact segment.
 2. Start from its six-field raw cells.
-3. Change only supported note, instrument, or ordinary-volume fields.
+3. Change only supported note and instrument fields or commands listed in `context.format.volume_commands` and `context.format.effect_commands`; keep each parameter inside its published inclusive range.
 4. Include every non-empty row that must remain; omit only rows intended to become empty.
 5. Prefer the smallest musically coherent segment. Several calls accumulate atomically in the same candidate.
 

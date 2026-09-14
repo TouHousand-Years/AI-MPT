@@ -7,13 +7,18 @@ description: Operate the OpenMPT Pattern MCP tools to read the current Sequence 
 
 Use the connected Pattern capability as a one-Pattern-at-a-time proposal workflow. The tools edit a private candidate; a frozen proposal is applied only after human approval or a saved automatic-accept preference, and every result must be read for its actual `status`.
 
-## Pattern switching
+## Tracker Pattern basics
 
-The capability binds exactly one Pattern at a time. Read the Sequence order first and use an existing zero-based Pattern index as the switch target. Manual navigation in OpenMPT changes only the human's view; it never changes the Agent binding.
+A Pattern is a fixed-size grid of rows and channels. Each row is one step of musical time, and playback walks the rows in order; the ticks inside a row are where sliding and oscillating effects are applied (row timing is reported in `context.timing`). Every channel of a row is one cell, and each cell carries up to four logical columns:
 
-To edit another Pattern in the same document, call `switch_pattern`. With no retained session, an approved request establishes a new session. With a retained session, pass its exact token; approval captures the target from scratch and returns a fresh token, so discard the old token. Read the returned `status` (`switched`, `unchanged`, or a typed rejection) before continuing.
+- **Note** — triggers a pitched note such as `C-5` (middle C), or a note-stopping event. It is the event that starts a sound.
+- **Instrument** — the sample or instrument index used with the note. A lone instrument number, without a note, resets that instrument's properties and is often paired with a volume slide.
+- **Volume** — a per-note volume command. Some formats have no volume column at all, and the available commands differ per format.
+- **Effect** — the general-purpose command column. Every format has it, but the command set varies by format. An effect can target the current note, the whole channel, or the whole song.
 
-Each switch grants the target Pattern's full rows and channels, but proposals remain single-Pattern. Finish the current candidate with `handoff_for_review` or `abort_session` before switching again. For multi-Pattern work, complete and verify one Pattern, end its session, switch, then acquire and verify the next Pattern independently.
+In the Score Context a cell is not four text columns but six byte-valued fields: `note`, `instrument`, `volume_command`, `volume`, `effect_command`, `effect_parameter`. Tracker displays use letter notation (uppercase for the effect column, lowercase for the volume column, e.g. `G05` versus `g05`), but the tools use numeric command IDs with semantic names. Before authoring either command column, read `context.format.volume_commands` and `context.format.effect_commands` and use only IDs those catalogs publish; see [raw-cell-model.md](references/raw-cell-model.md) for the exact field rules.
+
+The capability binds exactly one Pattern at a time, so a Pattern's rows and channels are the whole working surface of one session. Anything that spans Patterns is coordinated through the Sequence order instead (see [get-pattern-order.md](references/get-pattern-order.md)).
 
 ## Route
 
@@ -22,6 +27,13 @@ Load only the files needed for the current branch:
 - If no document is attached or the target may be wrong, read [connect-target.md](references/connect-target.md).
 - Before any retained read or edit, read [session-lifecycle.md](references/session-lifecycle.md).
 - Before interpreting or constructing cells, read [raw-cell-model.md](references/raw-cell-model.md).
+- Before authoring volume-command or effect-command cells, read the file for the bound format, identified by `context.format.name`:
+  - `mod` → [effects-mod.md](references/effects-mod.md)
+  - `xm` → [effects-xm.md](references/effects-xm.md)
+  - `s3m` → [effects-s3m.md](references/effects-s3m.md)
+  - `it` → [effects-it.md](references/effects-it.md)
+  - `mptm` → [effects-mptm.md](references/effects-mptm.md)
+  - `context.format.name` is always one of those five: a source format OpenMPT does not model natively (MED, DBM, OKT, …) is reported under the closest family, so there is no separate reference file for it.
 - For a tool call, read exactly that tool's file:
   - [`get_pattern_order`](references/get-pattern-order.md)
   - [`switch_pattern`](references/switch-pattern.md)

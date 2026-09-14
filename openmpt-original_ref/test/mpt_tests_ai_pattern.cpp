@@ -103,6 +103,9 @@ void AIPatternTests(const CString &fixture)
 		Require(context["timing"]["default_tempo"] == 125 && context["timing"]["default_speed"] == 6
 			&& context["timing"]["rows_per_beat"] == 4 && context["timing"]["rows_per_measure"] == 16, "Fixture timing");
 		Require(context["format"]["name"] == "mptm" && context["format"]["volume_max"] == 64, "Format write limits");
+		Require(context["format"]["volume_commands"].is_array() && context["format"]["volume_commands"].size() > 2
+			&& context["format"]["effect_commands"].is_array() && context["format"]["effect_commands"].size() > 2,
+			"Format publishes editable volume and effect command catalogs");
 		Require(context["instruments"].size() == 3 && context["samples"].size() == 3, "Existing resources summarized");
 		Require(context["cells"].size() > 0 && context["cells"][0]["note_kind"] == "pitched", "Sparse semantic cells");
 		const AI::Json range{{"first_row", 0}, {"row_count", 8}, {"first_channel", 0}, {"channel_count", 1}};
@@ -246,6 +249,36 @@ void AIPatternTests(const CString &fixture)
 		cap.Call("abort_session", {{"session", token}});
 	}
 	{
+		AI::PatternCapability cap(*doc, 0, {});
+		auto read = cap.Call("get_pattern_context", {{"occupy", true}});
+		const auto token = read.at("session");
+		for(const auto &command : read["context"]["format"]["volume_commands"])
+		{
+			auto segment = Segment(token, 1, 49);
+			segment["cells"][0]["cell"]["volume_command"] = command["id"];
+			segment["cells"][0]["cell"]["volume"] = command["parameter_max"];
+			Require(OK(cap.Call("replace_pattern_segment", segment)), "Every advertised volume command and maximum parameter is writable");
+		}
+		for(const auto &command : read["context"]["format"]["effect_commands"])
+		{
+			auto segment = Segment(token, 1, 49);
+			segment["cells"][0]["cell"]["effect_command"] = command["id"];
+			segment["cells"][0]["cell"]["effect_parameter"] = command["parameter_max"];
+			Require(OK(cap.Call("replace_pattern_segment", segment)), "Every advertised effect command and maximum parameter is writable");
+		}
+		auto invalidVolumeCommand = Segment(token, 1, 49);
+		invalidVolumeCommand["cells"][0]["cell"]["volume_command"] = MAX_VOLCMDS;
+		Require(!OK(cap.Call("replace_pattern_segment", invalidVolumeCommand)), "Unadvertised volume command is rejected");
+		auto invalidEffectCommand = Segment(token, 1, 49);
+		invalidEffectCommand["cells"][0]["cell"]["effect_command"] = MAX_EFFECTS;
+		Require(!OK(cap.Call("replace_pattern_segment", invalidEffectCommand)), "Unadvertised effect command is rejected");
+		auto invalidEmptyEffect = Segment(token, 1, 49);
+		invalidEmptyEffect["cells"][0]["cell"]["effect_parameter"] = 1;
+		const auto emptyFailure = cap.Call("replace_pattern_segment", invalidEmptyEffect);
+		Require(!OK(emptyFailure) && emptyFailure["error"]["field"] == "effect_parameter", "Empty effect requires a zero parameter");
+		cap.Call("abort_session", {{"session", token}});
+	}
+	{
 		auto &cell = *doc->GetSoundFile().Patterns[0].GetpModCommand(0, 1);
 		const auto saved = cell; cell.command = CMD_TEMPO; cell.param = 125;
 		AI::PatternCapability cap(*doc, 0, {});
@@ -261,7 +294,7 @@ void AIPatternTests(const CString &fixture)
 		const auto saved = cell; cell.param = 125;
 		AI::PatternCapability cap(*doc, 0, {});
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
-		Require(!OK(cap.Call("replace_pattern_segment", Segment(token, 1, 49))), "Raw effect parameter must be preserved even when its command is empty");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 1, 49))), "An invalid parameter beside an empty effect can be cleared");
 		cap.ForceRelease(); cell = saved;
 	}
 	{
@@ -277,9 +310,14 @@ void AIPatternTests(const CString &fixture)
 		const auto saved = cell; cell.note = NOTE_NOTECUT; cell.instr = 2;
 		AI::PatternCapability cap(*doc, 0, {});
 		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		AI::Json editSpecial{{"session", token}, {"channel", 1}, {"first_row", 0}, {"row_count", 1},
+			{"cells", AI::Json::array({{{"row", 0}, {"cell", Raw(cell)}}})}};
+		editSpecial["cells"][0]["cell"]["effect_command"] = CMD_TEMPO;
+		editSpecial["cells"][0]["cell"]["effect_parameter"] = 125;
+		Require(OK(cap.Call("replace_pattern_segment", editSpecial)), "Effect columns remain editable beside a preserved special note");
 		auto changedSpecial = Segment(token, 1, NOTE_NOTECUT);
 		changedSpecial["cells"][0]["cell"]["instrument"] = 1;
-		Require(!OK(cap.Call("replace_pattern_segment", changedSpecial)), "Unsupported special-note cell must remain byte-for-byte identical");
+		Require(!OK(cap.Call("replace_pattern_segment", changedSpecial)), "Unsupported special-note identity remains protected");
 		cap.ForceRelease(); cell = saved;
 	}
 	{
