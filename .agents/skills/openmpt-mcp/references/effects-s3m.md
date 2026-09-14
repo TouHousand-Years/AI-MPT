@@ -1,28 +1,28 @@
 # S3M effect column and volume column
 
-Self-contained reference for authoring the S3M effect column and volume column (`.s3m`) through the Pattern MCP. Everything needed is in this file; S3M uses a command set entirely different from MOD and XM, so do not carry letters over from another format's file.
+Self-contained reference for authoring the S3M effect column and volume column (`.s3m`) through the Pattern MCP. Everything needed is in this file; S3M uses a command set entirely different from MOD and XM, so do not carry commands over from another format's file.
 
 ## Before you write
 
-1. Read `context.format.effect_commands` and `context.format.volume_commands` for the bound document. Each lists the exact writable commands: numeric `id`, semantic `name`, inclusive `parameter_min` / `parameter_max`. Use those IDs in `effect_command` / `volume_command`; the letters below are only the tracker display notation.
+1. Read `context.format.effect_commands` and `context.format.volume_commands` for the bound document. Each lists the exact writable commands: numeric `id`, semantic `name`, inclusive `parameter_min` / `parameter_max`. Pick a command by its `name`, then write that entry's numeric `id` into `effect_command` / `volume_command` and the value into `effect_parameter` / `volume`.
 2. Read the current candidate over the segment you are about to replace, and include every row that must survive. Omitted rows become empty cells.
 3. The catalog is OpenMPT's full S3M set. Commands marked *non-ST3* below are not part of original Scream Tracker 3, but OpenMPT still exposes and plays them. The published catalog, not this list, is authoritative.
 
-## How to read the notation
+## How to read these tables
 
-- An effect is one letter plus a parameter, written `Axy`. Uppercase letters address the effect column; lowercase letters address the volume column.
-- `xx` is a two-digit hexadecimal value read as one byte; `xy` is two independent hexadecimal nibbles. Volume column parameters are decimal, matching the range the tool publishes.
-- In the raw cell, `effect_parameter` holds the plain integer value of the digits: `D05` → 5, `D20` → 32, `H8F` → 143. `volume` holds the decimal volume-column value.
-- A single command family shares one raw command. Write the catalog ID for the base letter and put the whole parameter in the field: `S9x` → the `s3mcmdex` ID with `effect_parameter` = `0x90 | x`.
+- The effect column is written through `effect_command` (the catalog `id` of the entry named in the table) and `effect_parameter`; the volume column through `volume_command` (again a catalog `id`) and `volume`.
+- `effect_parameter` is hexadecimal. `xx` is a whole byte (two hex digits), `xy` is two independent nibbles (`x` = high nibble, `y` = low nibble), and `x` is a single digit. It holds the plain integer value of the digits: a parameter written `05` is 5, `20` is 32, `8F` is 143.
+- `volume` is decimal, matching the range the tool publishes.
+- A command family shown as a bitwise expression shares one catalog entry. Write that entry's `id` and combine the sub-command into the parameter, for example `s3mcmdex` with `effect_parameter` = `0x90 + x`.
 - The tool accepts any byte 0–255 in `effect_parameter`, but the format only interprets some values. Stay inside the documented ranges.
 
 ## Frequency units
 
-Linear frequency slides are not available in S3M, so one unit of a pitch slide (`Exx`, `Fxx`, `Gxx`) is one *period*, a metric inverse to frequency: the lower the note, the smaller the audible change. A period is 3,546,895 ÷ frequency. Extra-fine units are 4× finer than fine units.
+Linear frequency slides are not available in S3M, so one unit of a pitch slide (Portamento Down, Portamento Up, Tone Portamento) is one *period*, a metric inverse to frequency: the lower the note, the smaller the audible change. A period is 3,546,895 ÷ frequency. Extra-fine units are 4× finer than fine units.
 
 ## Effect parameter tables
 
-### Vibrato / tremolo / panbrello waveform (`S3x`, `S4x`, `S5x`)
+### Vibrato / tremolo / panbrello waveform (Set Vibrato Waveform, Set Tremolo Waveform, Set Panbrello Waveform)
 
 | Parameter | Waveform |
 | --- | --- |
@@ -33,7 +33,7 @@ Linear frequency slides are not available in S3M, so one unit of a pitch slide (
 
 Each waveform is 64 points long; the speed parameter advances by that many points per tick.
 
-### Retrigger volume (`Qxy`, the `x` nibble)
+### Retrigger volume (Retrigger, the high nibble)
 
 | x | Effect | x | Effect |
 | --- | --- | --- | --- |
@@ -46,7 +46,7 @@ Each waveform is 64 points long; the speed parameter advances by that many point
 | 6 | Volume × ⅔ | E | Volume × 1.5 |
 | 7 | Volume × ½ | F | Volume × 2 |
 
-### Sound control (`S9x`)
+### Sound control (Sound Control, the low nibble)
 
 | Parameter | Name | Description |
 | --- | --- | --- |
@@ -62,67 +62,67 @@ In S3M these are ModPlug extensions rather than original Scream Tracker 3 comman
 
 All parameters are hexadecimal. "Mem" is behaviour at parameter 0: **Yes** recalls the command's own last non-zero parameter, **—** means zero has its own literal meaning, and **Global** means the command recalls any previous non-zero parameter in the same column. An entry marked *non-ST3* is available in OpenMPT's S3M but is not an original Scream Tracker 3 command.
 
-| Eff | Name | Catalog `name` | Mem | Description |
+| Name | `effect_command` | `effect_parameter` | Mem | Description |
 | --- | --- | --- | --- | --- |
-| `Axx` | Set Speed | `speed` | No | Sets the module Speed (ticks per row). |
-| `Bxx` | Position Jump | `positionjump` | — | Jumps to Order position `xx`; `B00` restarts. On the same row as `Cxx`, `Bxx` selects the Pattern `Cxx` breaks into. |
-| `Cxx` | Pattern Break | `patternbreak` | — | Jumps to row `xx` of the next Pattern. Range `00`–`3F`; higher values are ignored. |
-| `Dxy` | Volume Slide / Fine Volume Slide | `volumeslide` | Global | `D0y` down by `y`, `Dx0` up by `x`, every tick except the first; `DFy`/`DxF` apply only on the first tick. Volume caps at 64. |
-| `Exx` | Portamento Down / Fine / Extra Fine | `portamentodown` | Global | `Exx` slides down every tick except the first; `EFx` on the first tick only; `EEx` at 4× the precision of `EFx`. |
-| `Fxx` | Portamento Up / Fine / Extra Fine | `portamentoup` | Global | `Fxx` slides up every tick except the first; `FFx` on the first tick only; `FEx` at 4× the precision of `FFx`. |
-| `Gxx` | Tone Portamento | `toneportamento` | Yes | Slides the previous note toward the current note by `xx` per tick except the first. |
-| `Hxy` | Vibrato | `vibrato` | Yes | Vibrato, speed `x`, depth `y`, waveform from `S3x`. Shares memory with `Uxy`. |
-| `Ixy` | Tremor | `tremor` | Global | Volume on for `x` ticks, off for `y` ticks. |
-| `Jxy` | Arpeggio | `arpeggio` | Global | Cycles within one row between the current note, +`x` semitones, +`y` semitones. |
-| `Kxy` | Volume Slide + Vibrato | `vibratovol` | Global | `Dxy` volume slide plus `H00`. |
-| `Lxy` | Volume Slide + Tone Portamento | `toneportavol` | Global | `Dxy` volume slide plus `G00`. |
-| `Mxx` | Set Channel Volume | `channelvolume` | — | *non-ST3* Channel volume multiplier, `00` off to `40` full. |
-| `Nxy` | Channel Volume Slide | `channelvolslide` | Yes | *non-ST3* Like `Dxy`, applied to channel volume. |
-| `Oxx` | Sample Offset | `offset` | Yes | Starts the sample at `xx × 256`. Requires a note in the same cell. |
-| `Pxy` | Panning Slide / Fine Panning Slide | `panningslide` | Yes | *non-ST3* `P0y` slides right by `y`, `Px0` slides left by `x`, every tick except the first; `PFy`/`PxF` apply on the first tick only. |
-| `Qxy` | Retrigger | `retrig` | Global | Retriggers every `y` ticks and changes volume by the `x` nibble (see the retrigger volume table). |
-| `Rxy` | Tremolo | `tremolo` | Global | Volume tremolo, speed `x`, depth `y`, waveform from `S4x`. |
-| `S1x` | Glissando Control | `s3mcmdex` | — | `S10` off, `S11` on. Quirky and not widely supported. |
-| `S2x` | Set Finetune | `s3mcmdex` | — | Legacy command; overrides the current sample's C-5 frequency with a MOD finetune value. |
-| `S3x` | Set Vibrato Waveform | `s3mcmdex` | — | Selects the waveform table above for later `Hxy`. |
-| `S4x` | Set Tremolo Waveform | `s3mcmdex` | — | Selects the waveform table above for later `Rxy`. |
-| `S5x` | Set Panbrello Waveform | `s3mcmdex` | — | *non-ST3* Selects the waveform table above for later `Yxy`. |
-| `S6x` | Fine Pattern Delay | `s3mcmdex` | — | Extends the row by `x` ticks; multiple `S6x` on a row sum. |
-| `S8x` | Set Panning | `s3mcmdex` | — | Coarse panning, `0` left to `F` right. `Xxx` is finer. |
-| `S9x` | Sound Control | `s3mcmdex` | — | *non-ST3* Runs a sound control command (see the table above). |
-| `SAx` | High Offset | `s3mcmdex` | — | *non-ST3* Adds `x × 65536` to all following `Oxx` offsets. |
-| `SB0` | Pattern Loop Start | `s3mcmdex` | — | Marks the `SBx` loop start. |
-| `SBx` | Pattern Loop | `s3mcmdex` | — | Jumps back to the `SB0` row until `x` jumps total. Cannot span Patterns. Range `1`–`F`. |
-| `SCx` | Note Cut | `s3mcmdex` | — | Stops the sample after `x` ticks; ignored if `x` is 0 or ≥ Speed. |
-| `SDx` | Note Delay | `s3mcmdex` | — | Delays the cell's note/instrument by `x` ticks; ignored if `x` is 0 or ≥ Speed. |
-| `SEx` | Pattern Delay | `s3mcmdex` | — | Repeats the row `x` times without retriggering notes; only the leftmost `SEx` counts. |
-| `T0x` | Decrease Tempo | `tempo` | Yes | Lowers Tempo by `x` BPM on every tick except the first. |
-| `T1x` | Increase Tempo | `tempo` | Yes | Raises Tempo by `x` BPM on every tick except the first. |
-| `Txx` | Set Tempo | `tempo` | No | Sets Tempo when `xx` ≥ `20`. |
-| `Uxy` | Fine Vibrato | `finevibrato` | Yes | Like `Hxy` with 4× precision. Shares memory with `Hxy`. |
-| `Vxx` | Set Global Volume | `globalvolume` | — | Song global volume, `00` off to `40` full. |
-| `Wxy` | Global Volume Slide | `globalvolslide` | Yes | *non-ST3* Like `Dxy`, applied to the global volume. |
-| `Xxx` | Set Panning | `panning8` | — | Channel panning, `00` left to `80` right. `XA4` (a non-ST3 extension) enables surround on the channel; any other `Xxx` on that channel disables it. |
-| `Yxy` | Panbrello | `panbrello` | Yes | *non-ST3* Panning oscillates with speed `x`, depth `y`, waveform from `S5x`. |
-| `Zxx` | MIDI Macro | `midi` | — | *non-ST3* Runs a MIDI macro. S3M files do not store macros, so only the default macro configuration applies, and the Pattern tools cannot read or change it — the audible result is not verifiable here. |
+| Set Speed | `speed` | `xx` | No | Sets the module Speed (ticks per row). |
+| Position Jump | `positionjump` | `xx` | — | Jumps to Order position `xx`; parameter `00` restarts. On the same row as Pattern Break, it selects the Pattern that Pattern Break breaks into. |
+| Pattern Break | `patternbreak` | `xx` | — | Jumps to row `xx` of the next Pattern. Range `00`–`3F`; higher values are ignored. |
+| Volume Slide / Fine Volume Slide | `volumeslide` | `xy` | Global | Parameter `0y` down by `y`, `x0` up by `x`, every tick except the first; `Fy`/`xF` apply only on the first tick. Volume caps at 64. |
+| Portamento Down / Fine / Extra Fine | `portamentodown` | `xx` | Global | Parameter `xx` slides down every tick except the first; `Fx` on the first tick only; `Ex` at 4× the precision of `Fx`. |
+| Portamento Up / Fine / Extra Fine | `portamentoup` | `xx` | Global | Parameter `xx` slides up every tick except the first; `Fx` on the first tick only; `Ex` at 4× the precision of `Fx`. |
+| Tone Portamento | `toneportamento` | `xx` | Yes | Slides the previous note toward the current note by `xx` per tick except the first. |
+| Vibrato | `vibrato` | `xy` | Yes | Vibrato, speed `x`, depth `y`, waveform from Set Vibrato Waveform. Shares memory with Fine Vibrato. |
+| Tremor | `tremor` | `xy` | Global | Volume on for `x` ticks, off for `y` ticks. |
+| Arpeggio | `arpeggio` | `xy` | Global | Cycles within one row between the current note, +`x` semitones, +`y` semitones. |
+| Volume Slide + Vibrato | `vibratovol` | `xy` | Global | Volume Slide plus vibrato at parameter `00`. |
+| Volume Slide + Tone Portamento | `toneportavol` | `xy` | Global | Volume Slide plus tone portamento at parameter `00`. |
+| Set Channel Volume | `channelvolume` | `xx` | — | *non-ST3* Channel volume multiplier, `00` off to `40` full. |
+| Channel Volume Slide | `channelvolslide` | `xy` | Yes | *non-ST3* Like Volume Slide, applied to channel volume. |
+| Sample Offset | `offset` | `xx` | Yes | Starts the sample at `xx × 256`. Requires a note in the same cell. |
+| Panning Slide / Fine Panning Slide | `panningslide` | `xy` | Yes | *non-ST3* Parameter `0y` slides right by `y`, `x0` slides left by `x`, every tick except the first; `Fy`/`xF` apply on the first tick only. |
+| Retrigger | `retrig` | `xy` | Global | Retriggers every `y` ticks and changes volume by the high nibble (see the retrigger volume table). |
+| Tremolo | `tremolo` | `xy` | Global | Volume tremolo, speed `x`, depth `y`, waveform from Set Tremolo Waveform. |
+| Glissando Control | `s3mcmdex` | `0x10 + x` | — | `0x10` off, `0x11` on. Quirky and not widely supported. |
+| Set Finetune | `s3mcmdex` | `0x20 + x` | — | Legacy command; overrides the current sample's C-5 frequency with a MOD finetune value. |
+| Set Vibrato Waveform | `s3mcmdex` | `0x30 + x` | — | Selects the waveform table above for later Vibrato commands. |
+| Set Tremolo Waveform | `s3mcmdex` | `0x40 + x` | — | Selects the waveform table above for later Tremolo commands. |
+| Set Panbrello Waveform | `s3mcmdex` | `0x50 + x` | — | *non-ST3* Selects the waveform table above for later Panbrello commands. |
+| Fine Pattern Delay | `s3mcmdex` | `0x60 + x` | — | Extends the row by `x` ticks; multiple Fine Pattern Delay commands on a row sum. |
+| Set Panning (coarse) | `s3mcmdex` | `0x80 + x` | — | Coarse panning, `0` left to `F` right. Effect-column Set Panning is finer. |
+| Sound Control | `s3mcmdex` | `0x90 + x` | — | *non-ST3* Runs a sound control command (see the table above). |
+| High Offset | `s3mcmdex` | `0xA0 + x` | — | *non-ST3* Adds `x × 65536` to all following Sample Offset parameters. |
+| Pattern Loop Start | `s3mcmdex` | `0xB0` | — | Marks the Pattern Loop start. |
+| Pattern Loop | `s3mcmdex` | `0xB0 + x` | — | Jumps back to the Pattern Loop Start row until `x` jumps total. Cannot span Patterns. Range `1`–`F`. |
+| Note Cut | `s3mcmdex` | `0xC0 + x` | — | Stops the sample after `x` ticks; ignored if `x` is 0 or ≥ Speed. |
+| Note Delay | `s3mcmdex` | `0xD0 + x` | — | Delays the cell's note/instrument by `x` ticks; ignored if `x` is 0 or ≥ Speed. |
+| Pattern Delay | `s3mcmdex` | `0xE0 + x` | — | Repeats the row `x` times without retriggering notes; only the leftmost Pattern Delay counts. |
+| Decrease Tempo | `tempo` | `0x00 + x` | Yes | Lowers Tempo by `x` BPM on every tick except the first. |
+| Increase Tempo | `tempo` | `0x10 + x` | Yes | Raises Tempo by `x` BPM on every tick except the first. |
+| Set Tempo | `tempo` | `xx` | No | Sets Tempo when `xx` ≥ `20`. |
+| Fine Vibrato | `finevibrato` | `xy` | Yes | Like Vibrato with 4× precision. Shares memory with Vibrato. |
+| Set Global Volume | `globalvolume` | `xx` | — | Song global volume, `00` off to `40` full. |
+| Global Volume Slide | `globalvolslide` | `xy` | Yes | *non-ST3* Like Volume Slide, applied to the global volume. |
+| Set Panning | `panning8` | `xx` | — | Channel panning, `00` left to `80` right. Parameter `A4` (a non-ST3 extension) enables surround on the channel; any other Set Panning value on that channel disables it. |
+| Panbrello | `panbrello` | `xy` | Yes | *non-ST3* Panning oscillates with speed `x`, depth `y`, waveform from Set Panbrello Waveform. |
+| MIDI Macro | `midi` | `xx` | — | *non-ST3* Runs a MIDI macro. S3M files do not store macros, so only the default macro configuration applies, and the Pattern tools cannot read or change it — the audible result is not verifiable here. |
 
-The base and extended catalogs both expose a `tempo` command ID that carries `T0x`, `T1x` and `Txx`; the sub-command is the high nibble of `effect_parameter`. The base catalog also contains an internal `dummy` entry that is never useful to write.
+The base and extended catalogs both expose a `tempo` command ID that carries Decrease Tempo, Increase Tempo and Set Tempo; the sub-command is the high nibble of `effect_parameter`. The base catalog also contains an internal `dummy` entry that is never useful to write.
 
 ## Volume column commands
 
 All parameters are decimal, matching the published range. S3M's volume column is intentionally small.
 
-| Eff | Name | Catalog `name` | Mem | Description |
+| Name | `volume_command` | `volume` | Mem | Description |
 | --- | --- | --- | --- | --- |
-| `vxx` | Set Volume | `volume` | No | Sets note volume, 0 off to 64 full. |
-| `pxx` | Set Panning | `panning` | No | Channel panning, 0 left to 64 right. *non-ST3* |
+| Set Volume | `volume` | `0`–`64` | No | Sets note volume, 0 off to 64 full. |
+| Set Panning | `panning` | `0`–`64` | No | Channel panning, 0 left to 64 right. *non-ST3* |
 
-Volume slides, fine slides, vibrato depth, tone portamento and panning slides that other formats allow in the volume column are **not** available in S3M. Express them in the effect column (`Dxy`, `Gxx`, `Hxy`, `Pxy`).
+Volume slides, fine slides, vibrato depth, tone portamento and panning slides that other formats allow in the volume column are **not** available in S3M. Express them in the effect column (Volume Slide, Tone Portamento, Vibrato, Panning Slide).
 
 ## Authoring notes
 
-- **Whole families share one ID.** `S1x`–`SEx` all use `s3mcmdex`; `T0x`, `T1x` and `Txx` all use `tempo`. The sub-command is the high nibble of `effect_parameter`.
+- **Whole families share one ID.** Glissando Control through Pattern Delay all use `s3mcmdex`; Decrease Tempo, Increase Tempo and Set Tempo all use `tempo`. The sub-command is the high nibble of `effect_parameter`.
 - **S3M uses global effect memory.** Commands marked **Global** above recall any previous non-zero parameter written in the same column, not just their own. This differs from MOD/XM/IT and is the most common source of unintended slides.
-- **Global commands change playback flow, not just the cell.** `Bxx`, `Cxx`, `SBx`, `SEx`, `Axx`, `Txx`, `Vxx`, `Wxy` and `S6x` affect the whole song. Use them deliberately; their audible result is not verifiable from the Pattern tools alone.
-- **AdLib / OPL3 instruments** are supported in S3M, but `Oxx`, `S9x`, `SAx` and `XA4` have no effect on them, `Mxx` and `Nxy` work only with them in OpenMPT, and `Xxx`/`pxx` collapse to hard left, center and hard right.
+- **Global commands change playback flow, not just the cell.** Position Jump, Pattern Break, Pattern Loop, Pattern Delay, Set Speed, Set Tempo, Set Global Volume, Global Volume Slide and Fine Pattern Delay affect the whole song. Use them deliberately; their audible result is not verifiable from the Pattern tools alone.
+- **AdLib / OPL3 instruments** are supported in S3M, but Sample Offset, Sound Control, High Offset and Set Panning parameter `A4` have no effect on them, Set Channel Volume and Channel Volume Slide work only with them in OpenMPT, and effect-column Set Panning and volume-column Set Panning collapse to hard left, center and hard right.
 - The Pattern tools cannot verify audio. A written command is only as correct as the catalog entry and the range documented above.
