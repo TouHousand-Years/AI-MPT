@@ -20,9 +20,9 @@ Every tool result is structured. Branch on `error.layer` and `error.code`; use `
 
 ## Request validation
 
-- `validationFailure`: fix the reported range or field using fresh candidate context and the rules in [raw-cell-model.md](raw-cell-model.md). For `switch_pattern`, choose an existing zero-based target from [get-pattern-order.md](get-pattern-order.md); the current binding is unchanged. Retry only the corrected bounded call with the still-valid token.
+- `validationFailure`: fix the reported range or field using fresh candidate context and the rules in [raw-cell-model.md](raw-cell-model.md). For `switch_pattern`, choose an existing target from [get-pattern-order.md](get-pattern-order.md), or a missing index within the module format limit when Order has capacity; the current binding is unchanged. Retry only the corrected bounded call with the still-valid token.
 - `boundPatternViolation`: another tool carried a Pattern index. Use `switch_pattern` to change the binding, and operate only on the Pattern bound at session acquisition.
-- `unsupported`: the requested operation is outside this seven-tool Pattern capability. Explain the boundary instead of simulating it through UI actions.
+- `unsupported`: the requested operation is outside this eight-tool Pattern capability. Explain the boundary instead of simulating it through UI actions.
 
 If the failure does not establish that the session ended, preserve the exact token and either continue safely or end it explicitly. If session state is uncertain, prefer a fresh read; claim cleanup only from the returned ending result and claim application only from `status: "applied"`.
 

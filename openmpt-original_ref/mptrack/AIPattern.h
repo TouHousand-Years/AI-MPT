@@ -55,6 +55,7 @@ private:
 	{
 		PATTERNINDEX source = PATTERNINDEX_INVALID;
 		PATTERNINDEX target = PATTERNINDEX_INVALID;
+		bool create = false;
 		std::string sourceSignature;
 		std::string token;
 		bool authenticated = false;
@@ -79,6 +80,7 @@ private:
 	Json ContextFor(PATTERNINDEX pattern, ROWINDEX rows, CHANNELINDEX channels, const std::vector<ModCommand> &cells, const Json &args) const;
 	Json Context(const std::vector<ModCommand> &cells, const Json &args) const;
 	Json PatternOrder() const;
+	Json ReorderPatternOrder(const Json &args);
 	Json PatternInfo(PATTERNINDEX pattern) const;
 	Json OrderReferences(PATTERNINDEX pattern) const;
 	CaptureState CapturePattern(PATTERNINDEX pattern, std::optional<PatternRect> selection) const;

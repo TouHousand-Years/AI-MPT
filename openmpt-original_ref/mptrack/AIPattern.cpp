@@ -308,7 +308,7 @@ Json PatternCapability::Dispatch(const std::string &tool, const Json &args)
 	try
 	{
 		if(!args.is_object()) return Failure("schemaFailure", "Arguments must be an object");
-		if(tool != "get_pattern_context" && tool != "get_pattern_order" && tool != "switch_pattern" && tool != "replace_pattern_segment"
+		if(tool != "get_pattern_context" && tool != "get_pattern_order" && tool != "reorder_pattern_order" && tool != "switch_pattern" && tool != "replace_pattern_segment"
 			&& tool != "handoff_for_review" && tool != "abort_session" && tool != "release_occupancy") return Failure("unsupported", "Unknown Pattern tool");
 		if(args.contains("occupy") && !args.at("occupy").is_boolean()) return Failure("schemaFailure", "occupy must be boolean");
 		if(tool != "switch_pattern" && args.contains("pattern") && (!args.at("pattern").is_number_integer() || args.at("pattern").get<int>() != static_cast<int>(m_pattern)))
@@ -349,6 +349,7 @@ Json PatternCapability::Dispatch(const std::string &tool, const Json &args)
 			return {{"ok", true}};
 		}
 		if(tool == "replace_pattern_segment") return Replace(args);
+		if(tool == "reorder_pattern_order") return ReorderPatternOrder(args);
 		if(tool == "handoff_for_review")
 		{
 			auto diff = Diff(m_baseline, m_candidate);
@@ -515,10 +516,13 @@ Json PatternCapability::Switch(const Json &args)
 	long long requested = 0;
 	try { requested = args.at("pattern").get<long long>(); }
 	catch(const std::exception &) { return Failure("validationFailure", "Target Pattern index is out of range"); }
-	if(requested < 0 || static_cast<unsigned long long>(requested) >= static_cast<unsigned long long>(sf.Patterns.Size())
-		|| !sf.Patterns.IsValidPat(static_cast<PATTERNINDEX>(requested)))
-		return Failure("validationFailure", "Target Pattern does not exist");
+	if(requested < 0 || static_cast<unsigned long long>(requested) >= static_cast<unsigned long long>(sf.GetModSpecifications().patternsMax)
+		|| static_cast<unsigned long long>(requested) >= static_cast<unsigned long long>(PATTERNINDEX_INVALID))
+		return Failure("validationFailure", "Target Pattern index is outside the module format limits");
 	const PATTERNINDEX target = static_cast<PATTERNINDEX>(requested);
+	const bool create = !sf.Patterns.IsValidPat(target);
+	if(create && sf.Order().GetRemainingCapacity() == 0)
+		return Failure("validationFailure", "The current Sequence has no room to append a new Pattern");
 	if(args.contains("session") && !args.at("session").is_string())
 		return Failure("schemaFailure", "session must be a string");
 	const bool authenticated = args.contains("session");
@@ -550,6 +554,7 @@ Json PatternCapability::Switch(const Json &args)
 	SwitchRequest request;
 	request.source = m_pattern;
 	request.target = target;
+	request.create = create;
 	request.sourceSignature = Signature();
 	request.token = m_token;
 	request.authenticated = authenticated;
@@ -570,6 +575,36 @@ Json PatternCapability::Switch(const Json &args)
 Json PatternCapability::PerformSwitch(const SwitchRequest &request)
 {
 	auto &sf = m_doc.GetSoundFile();
+	bool created = false;
+	ORDERINDEX appendedOrder = ORDERINDEX_INVALID;
+	if(!sf.Patterns.IsValidPat(request.target) && request.create)
+	{
+		const auto &spec = sf.GetModSpecifications();
+		if(request.target >= spec.patternsMax || sf.Order().GetRemainingCapacity() == 0)
+		{
+			if(!request.authenticated) ForceRelease();
+			return Failure("validationFailure", "Target Pattern can no longer be created");
+		}
+		ROWINDEX rows = 64;
+		if(sf.Patterns.IsValidPat(request.source)) rows = sf.Patterns[request.source].GetNumRows();
+		rows = Clamp(rows, spec.patternRowsMin, spec.patternRowsMax);
+		{
+			CriticalSection cs;
+			if(!sf.Patterns.Insert(request.target, rows))
+			{
+				if(!request.authenticated) ForceRelease();
+				return Failure("commitFailed", "Could not create the target Pattern");
+			}
+			created = true;
+			appendedOrder = sf.Order().GetLengthTailTrimmed();
+			if(sf.Order().insert(appendedOrder, 1, request.target) != 1)
+			{
+				sf.Patterns.Remove(request.target);
+				if(!request.authenticated) ForceRelease();
+				return Failure("commitFailed", "Could not append the new Pattern to Order");
+			}
+		}
+	}
 	if(!sf.Patterns.IsValidPat(request.target))
 	{
 		if(!request.authenticated) ForceRelease();
@@ -581,6 +616,12 @@ Json PatternCapability::PerformSwitch(const SwitchRequest &request)
 		captured = CapturePattern(request.target, std::nullopt);
 	} catch(const std::exception &)
 	{
+		if(created)
+		{
+			CriticalSection cs;
+			sf.Order().Remove(appendedOrder, appendedOrder);
+			sf.Patterns.Remove(request.target);
+		}
 		// A failed capture never replaced the source binding; only a session-less reservation needs cleanup.
 		if(!request.authenticated) ForceRelease();
 		return Failure("validationFailure", "Target Pattern cannot be captured");
@@ -597,6 +638,12 @@ Json PatternCapability::PerformSwitch(const SwitchRequest &request)
 			{"relationship", SwitchRelationship}};
 	} catch(const std::exception &)
 	{
+		if(created)
+		{
+			CriticalSection cs;
+			sf.Order().Remove(appendedOrder, appendedOrder);
+			sf.Patterns.Remove(request.target);
+		}
 		if(!request.authenticated) ForceRelease();
 		return Failure("commitFailed", "Could not prepare the switch response");
 	}
@@ -605,7 +652,70 @@ Json PatternCapability::PerformSwitch(const SwitchRequest &request)
 	Adopt(std::move(captured));
 	m_retained = true;
 	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
+	if(created)
+	{
+		reply["status"] = "created";
+		reply["created"] = true;
+		reply["appended_order"] = appendedOrder;
+		m_doc.SetModified();
+		m_doc.UpdateAllViews(nullptr, PatternHint(request.target).Names());
+		m_doc.UpdateAllViews(nullptr, SequenceHint().Data());
+	}
 	return reply;
+}
+
+Json PatternCapability::ReorderPatternOrder(const Json &args)
+{
+	if(!args.contains("order") || !args.at("order").is_array())
+		return Failure("schemaFailure", "reorder_pattern_order requires an order array");
+	auto &sf = m_doc.GetSoundFile();
+	auto &sequence = sf.Order();
+	const auto &requested = args.at("order");
+	if(requested.size() != sequence.size())
+		return Failure("validationFailure", "order must contain every current Order index exactly once");
+	std::vector<bool> seen(sequence.size(), false);
+	std::vector<ORDERINDEX> permutation;
+	permutation.reserve(sequence.size());
+	for(const auto &value : requested)
+	{
+		if(!value.is_number_integer()) return Failure("validationFailure", "Every order entry must be an integer index");
+		long long index = -1;
+		try { index = value.get<long long>(); } catch(const std::exception &) { return Failure("validationFailure", "Order index is out of range"); }
+		if(index < 0 || static_cast<size_t>(index) >= sequence.size() || seen[static_cast<size_t>(index)])
+			return Failure("validationFailure", "order must be a permutation of the current Order indices");
+		seen[static_cast<size_t>(index)] = true;
+		permutation.push_back(static_cast<ORDERINDEX>(index));
+	}
+	bool changed = false;
+	for(size_t i = 0; i < permutation.size(); ++i) changed = changed || permutation[i] != i;
+	if(!changed)
+	{
+		auto result = PatternOrder();
+		result["status"] = "unchanged";
+		result["session"] = m_token;
+		return result;
+	}
+	std::vector<PATTERNINDEX> reordered(sequence.size());
+	std::vector<ORDERINDEX> inverse(sequence.size());
+	for(size_t destination = 0; destination < permutation.size(); ++destination)
+	{
+		reordered[destination] = sequence[permutation[destination]];
+		inverse[permutation[destination]] = static_cast<ORDERINDEX>(destination);
+	}
+	{
+		CriticalSection cs;
+		for(size_t i = 0; i < reordered.size(); ++i) sequence[i] = reordered[i];
+		if(sequence.GetRestartPos() < inverse.size()) sequence.SetRestartPos(inverse[sequence.GetRestartPos()]);
+		if(sf.m_PlayState.m_nCurrentOrder < inverse.size()) sf.m_PlayState.m_nCurrentOrder = inverse[sf.m_PlayState.m_nCurrentOrder];
+		if(sf.m_PlayState.m_nNextOrder < inverse.size()) sf.m_PlayState.m_nNextOrder = inverse[sf.m_PlayState.m_nNextOrder];
+	}
+	m_doc.SetModified();
+	m_doc.UpdateAllViews(nullptr, SequenceHint().Data());
+	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
+	auto result = PatternOrder();
+	result["status"] = "reordered";
+	result["session"] = m_token;
+	return result;
 }
 
 Json PatternCapability::ResolveSwitch(bool approve)
@@ -638,11 +748,17 @@ Json PatternCapability::SwitchRange() const
 	const auto &request = *m_pendingSwitch;
 	const auto source = PatternInfo(request.source);
 	const auto target = PatternInfo(request.target);
+	const auto &sf = m_doc.GetSoundFile();
+	const auto &spec = sf.GetModSpecifications();
+	const int targetRows = request.create
+		? Clamp(source.value("rows", 64), static_cast<int>(spec.patternRowsMin), static_cast<int>(spec.patternRowsMax))
+		: target.value("rows", 0);
 	return {{"source_pattern", request.source},
 		{"source_name", source.value("name", std::string{})},
 		{"target_pattern", request.target},
+		{"creates_target", request.create},
 		{"target_name", target.value("name", std::string{})},
-		{"target_rows", target.value("rows", 0)},
+		{"target_rows", targetRows},
 		{"target_channels", m_doc.GetSoundFile().GetNumChannels()},
 		{"authenticated", request.authenticated},
 		{"order_references", {{"source", OrderReferences(request.source)}, {"target", OrderReferences(request.target)}}},

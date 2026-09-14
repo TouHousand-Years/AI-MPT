@@ -1,6 +1,6 @@
 # Pattern MCP Sidecar
 
-Status: implemented (issues 30 and 31, plus the cross-Pattern order and switch slice); verified with the official MCP Inspector CLI.
+Status: implemented (issues 30 and 31, plus cross-Pattern switching and Sequence Order management); verified with the official MCP Inspector CLI.
 Label: triage
 
 `openmpt_mcp.py` implements issue 31 under issue 26: it maps
@@ -14,7 +14,8 @@ explicitly publish the active document from OpenMPT's AI / MCP panel; the
 long-running Sidecar reads that current-user target file and attaches to the
 exact published lifetime identities. The translator also exposes the
 cross-Pattern slice: `get_pattern_order` reads the current Sequence order
-through the app without requesting occupancy, and `switch_pattern` requests or
+through the app without requesting occupancy, `reorder_pattern_order` applies
+a complete Order-index permutation during a retained session, and `switch_pattern` requests or
 performs an approved rebinding to another Pattern while the connection keeps
 one retained session.
 
@@ -28,7 +29,7 @@ python sidecar/openmpt_mcp.py --help
 ```
 
 The process tests launch the Sidecar over stdin/stdout and use an independent
-scripted Windows named-pipe peer. They cover all seven translations, explicit
+scripted Windows named-pipe peer. They cover all eight translations, explicit
 and published-target attachment, guarded target switching, error-layer
 preservation, fragmented replies, rejected attachment, disconnect without
 mutation replay, and rejection of remote pipe names.
@@ -42,7 +43,7 @@ $env:OPENMPT_RUN_NATIVE_INTEGRATION = '1'
 python -m unittest sidecar.test_native_integration -v
 ```
 
-It drives all seven tools through the running app, walks the guided failure
+It drives all eight tools through the running app, walks the guided failure
 cases (`notAttached`, `documentGone`, `owningThreadRequired`, `instanceGone`),
 and asserts from the integration trace that no AI IPC path executed on the
 realtime audio callback while playback and IPC traffic ran concurrently.
@@ -64,7 +65,7 @@ the bare `--` are Inspector's own flags (`--method`, `--tool-name`,
 `--tool-arg`, `--format`), selecting the MCP operation to run. In the launch
 command, `--cli` selects Inspector's CLI mode and `python` plus the absolute
 script path launch the Sidecar as the MCP server. `tools/list` returns exactly
-the seven Pattern-mode tools; `tools/call get_pattern_context` against the
+the eight Pattern-mode tools; `tools/call get_pattern_context` against the
 running app with the issue-28 fixture open returned the real Score Context in
 `structuredContent`.
 
@@ -120,7 +121,7 @@ documents does not require editing or restarting Codex:
 1. Open the document and its Patterns tab in OpenMPT.
 2. Open the **AI / MCP** panel.
 3. Click **Connect active doc to Codex**.
-4. Use the seven Pattern tools from the existing Codex task.
+4. Use the eight Pattern tools from the existing Codex task.
 
 The button atomically publishes the exact pipe, application-lifetime ID,
 document-lifetime ID, and a fresh publication generation to
@@ -137,7 +138,7 @@ old work ends. Re-publishing the same document creates a new generation, which
 is an explicit request to clear a latched attachment error and reconnect.
 
 A successful `switch_pattern` that returns a `session` token—`status: switched`,
-or `status: unchanged` carrying the retained token—counts as retained work, so
+`status: created`, or `status: unchanged` carrying the retained token—counts as retained work, so
 the Sidecar pins the published document until the retained session ends. A
 session-less `status: unchanged` leaves retention unchanged. A
 `handoff_for_review` that returns `status: pending_review` ends that retention
@@ -199,7 +200,9 @@ clients can perform one-shot read-only calls without competing for the pipe.
 An `occupy=true` read claims the single retained session for that connection;
 until it releases or hands off the session, calls from other connections receive
 `busy`. A successful `switch_pattern` keeps that same retained session, now
-bound to the target Pattern with a fresh token. `get_pattern_order` is always
+bound to the target Pattern with a fresh token. A missing format-valid target is
+created on approval and appended at the effective end of the current Order.
+`get_pattern_order` is always
 available: it is a session-less read that never claims or leaks occupancy.
 Attaching or disconnecting a read-only client never steals or releases
 another connection's retained state.
@@ -210,8 +213,8 @@ owning-thread guard rejects it with `owningThreadRequired`, making the
 issue-24 dispatch seam observable from the transport. The Sidecar never sends
 this flag; only `probe.py` does.
 
-The seven tool schemas are in `openmpt_mcp.py`. Pattern indices are app-owned
-and zero-based; `switch_pattern` is the only way to change the bound Pattern,
+The eight tool schemas are in `openmpt_mcp.py`. Pattern and Order indices are
+app-owned and zero-based; `switch_pattern` is the only way to change the bound Pattern,
 and manual navigation in OpenMPT never rebinds it. Ranges and channels are also
 zero-based.
 Segment entries use absolute row indices with all six raw cell fields; omitted

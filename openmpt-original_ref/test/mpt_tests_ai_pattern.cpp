@@ -52,6 +52,17 @@ void AIPatternTests(const CString &fixture)
 			"Valid unreferenced Patterns remain discoverable");
 		const auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
 		Require(OK(cap.Call("get_pattern_order", AI::Json::object())) && doc->AIOccupied(), "Order inspection preserves an existing session");
+		const auto invalidReorder = cap.Call("reorder_pattern_order", {{"session", token}, {"order", AI::Json::array({0, 0, 2, 3, 4})}});
+		Require(ErrorCode(invalidReorder) == "validationFailure" && sf.Order()[1] == PATTERNINDEX_SKIP,
+			"Order reordering rejects a non-permutation without changing Sequence data");
+		const auto reordered = cap.Call("reorder_pattern_order", {{"session", token}, {"order", AI::Json::array({4, 2, 0, 1, 3})}});
+		Require(OK(reordered) && reordered["status"] == "reordered" && reordered["session"] == token,
+			"Order reordering keeps the retained session");
+		Require(reordered["entries"][0]["kind"] == "invalid" && reordered["entries"][1]["pattern"] == 0
+			&& reordered["entries"][3]["kind"] == "skip" && reordered["entries"][4]["kind"] == "stop",
+			"Order reordering moves every original entry, including markers");
+		Require(cap.Call("reorder_pattern_order", {{"session", token}, {"order", AI::Json::array({0, 1, 2, 3, 4})}})["status"] == "unchanged",
+			"Identity Order permutation is an authenticated no-op");
 		cap.Call("abort_session", {{"session", token}});
 		const auto sequence = sf.Order.AddSequence();
 		Require(sequence != SEQUENCEINDEX_INVALID, "Fixture supports another sequence");
@@ -339,7 +350,6 @@ void AIPatternTests(const CString &fixture)
 		Require(OK(same) && same["status"] == "unchanged" && same["session"] == token, "Same target is an authenticated no-op");
 		Require(!OK(cap.Call("switch_pattern", {{"pattern", 0}})), "Occupied switching requires a token");
 		Require(ErrorCode(cap.Call("switch_pattern", {{"pattern", 0}, {"session", "old-token"}})) == "occupancyLost", "Old token cannot switch");
-		Require(!OK(cap.Call("switch_pattern", {{"pattern", 999}, {"session", token}})) && cap.Pattern() == 1, "Invalid target cannot replace current binding");
 		Require(!OK(cap.Call("switch_pattern", {{"pattern", 65536}, {"session", token}})) && !cap.PendingSwitch(), "Oversized Pattern indices cannot wrap to an existing target");
 		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 2, 55))), "Switch grants channels outside old selection");
 		Require(ErrorCode(cap.Call("switch_pattern", {{"pattern", 0}, {"session", token}})) == "candidateExists", "Unsubmitted edits block switch");
@@ -357,6 +367,30 @@ void AIPatternTests(const CString &fixture)
 		cap.ForceRelease();
 		Require(!cap.PendingSwitch() && ErrorCode(cap.ResolveSwitch(true)) == "occupancyLost", "Forced release terminates switch waiting");
 		Require(doc->GetSoundFile().Order() == order && doc->GetSoundFile().GetCurrentOrder() == playOrder, "Switching never edits Order or playback position");
+	}
+	{
+		auto &sf = doc->GetSoundFile();
+		const auto savedOrder = sf.Order();
+		const PATTERNINDEX target = sf.Patterns.Size();
+		AI::PatternCapability cap(*doc, 0, {});
+		Require(cap.Call("switch_pattern", {{"pattern", target}}).value("pending_approval", false),
+			"Switching to a missing format-valid Pattern waits for approval");
+		Require(cap.SwitchRange()["creates_target"] == true && !sf.Patterns.IsValidPat(target),
+			"A pending missing-Pattern switch declares creation without mutating early");
+		Require(ErrorCode(cap.ResolveSwitch(false)) == "patternSwitchRejected" && !sf.Patterns.IsValidPat(target),
+			"Rejecting the switch does not create a Pattern");
+		Require(cap.Call("switch_pattern", {{"pattern", target}}).value("pending_approval", false),
+			"The missing Pattern can be requested again");
+		const auto created = cap.ResolveSwitch(true);
+		Require(OK(created) && created["status"] == "created" && created["created"] == true
+			&& created["context"]["pattern"] == target && sf.Patterns.IsValidPat(target),
+			"Approval creates and binds the requested Pattern index");
+		const ORDERINDEX appended = created["appended_order"].get<ORDERINDEX>();
+		Require(appended < sf.Order().size() && sf.Order()[appended] == target,
+			"The created Pattern is appended to the effective end of Order");
+		cap.Call("abort_session", {{"session", created["session"]}});
+		sf.Order() = savedOrder;
+		sf.Patterns.Remove(target);
 	}
 	{
 		auto &sf = doc->GetSoundFile();

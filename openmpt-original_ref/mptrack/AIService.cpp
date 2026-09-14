@@ -773,7 +773,8 @@ public:
 		if(capability->Occupied() && result.value("ok", false) && result.contains("session")) capabilityConnection = connection;
 		else if(capability->PendingSwitch()) capabilityConnection = connection;
 		else if(!capability->Occupied()) capabilityConnection = 0;
-		if(result.value("status", std::string{}) == "switched" && document) SynchronizePatternDisplay(*document, capability->Pattern());
+		const auto status = result.value("status", std::string{});
+		if((status == "switched" || status == "created") && document) SynchronizePatternDisplay(*document, capability->Pattern());
 		return result;
 	}
 	std::optional<ModCommand> CurrentCell(const Json &cell) const
@@ -813,7 +814,8 @@ void Panel::ConsumeConfigure(Json result)
 	// connection keeps ownership of the resulting session.
 	const bool resolved = result.contains("status") || result.contains("ending_reminder");
 	if(!resolved) return;
-	if(document && result.value("status", std::string{}) == "switched")
+	const auto status = result.value("status", std::string{});
+	if(document && (status == "switched" || status == "created"))
 		SynchronizePatternDisplay(*document, capability->Pattern());
 	lastMessage = Text(result.dump());
 	if(pending)
@@ -1189,7 +1191,8 @@ BOOL ReviewPanel::OnCommand(WPARAM wParam, LPARAM lParam)
 			const bool switchPending = service->capability->PendingSwitch();
 			Json result = switchPending ? service->capability->ResolveSwitch(id == Approve)
 				: service->capability->ResolveExpansion(id == Approve);
-			if(result.value("status", std::string{}) == "switched" && service->document)
+			const auto status = result.value("status", std::string{});
+			if((status == "switched" || status == "created") && service->document)
 				SynchronizePatternDisplay(*service->document, service->capability->Pattern());
 			if(result.value("ok", false) && service->capability->Occupied())
 				service->capabilityConnection = service->pending->connection;

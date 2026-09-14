@@ -37,7 +37,10 @@ TOOLS = [
                                    ("session", "channel", "first_row", "row_count", "cells"))},
     {"name": "get_pattern_order", "description": "Read the current Sequence order without requesting write occupancy: one entry per Order index in order, preserving duplicate, skip and stop markers, plus the number, name and row count of valid Patterns and valid Patterns not referenced by the Sequence.",
      "inputSchema": object_schema({})},
-    {"name": "switch_pattern", "description": "Request a switch of the edit binding to the zero-based pattern, optionally authenticated by the session token of a retained session. Without a session the request waits for human approval in OpenMPT. Uncommitted candidate edits or a pending proposal must be applied, rejected or cancelled first. Approval re-captures the target and authorizes the whole Pattern (all rows and channels), returning a fresh session token. Duplicate order references address the same Pattern; each proposal and Undo touches exactly one Pattern. " + ENDING,
+    {"name": "reorder_pattern_order", "description": "Reorder the current Sequence while preserving every Order entry. Requires a retained session. Pass order as the complete destination-to-source permutation of the zero-based Order indices returned by get_pattern_order; duplicates, skip markers and stop markers move with their source entries. The operation applies immediately, keeps the bound Pattern and session, and returns the resulting Sequence order. " + ENDING,
+     "inputSchema": object_schema({"session": SESSION, "order": {"type": "array", "items": INTEGER,
+                                                                  "description": "Every current zero-based Order index exactly once, in desired order."}}, ("session", "order"))},
+    {"name": "switch_pattern", "description": "Request a switch of the edit binding to the zero-based pattern, optionally authenticated by the session token of a retained session. Without a session the request waits for human approval in OpenMPT. Uncommitted candidate edits or a pending proposal must be applied, rejected or cancelled first. Approval creates a missing format-valid target Pattern at the requested index, appends it to the effective end of the current Order, then captures and authorizes the whole Pattern (all rows and channels), returning a fresh session token. Duplicate order references address the same Pattern; each proposal and Undo touches exactly one Pattern. " + ENDING,
      "inputSchema": object_schema({"session": SESSION, "pattern": dict(INTEGER, description="Zero-based target Pattern index.")}, ("pattern",))},
     {"name": "handoff_for_review", "description": "Freeze the entire final proposal and release occupancy atomically. The frozen single-Pattern proposal may be applied automatically (status applied) or wait for human review (status pending_review); either way occupancy ends. " + ENDING,
      "inputSchema": object_schema({"session": SESSION}, ("session",))},
@@ -140,7 +143,7 @@ class Sidecar:
 
     def update_session_state(self, name, result):
         if result.get("ok", False):
-            if name in ("get_pattern_context", "switch_pattern") and isinstance(result.get("session"), str) and result["session"]:
+            if name in ("get_pattern_context", "switch_pattern", "reorder_pattern_order") and isinstance(result.get("session"), str) and result["session"]:
                 self.retained_session = True
             elif name in ENDING_TOOLS:
                 self.retained_session = False
@@ -215,7 +218,7 @@ class Sidecar:
         method = request["method"]
         if method == "initialize":
             return {"protocolVersion": PROTOCOL, "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "openmpt-pattern", "version": "0.2.0"}}
+                    "serverInfo": {"name": "openmpt-pattern", "version": "0.3.0"}}
         if method == "ping":
             return {}
         if method == "tools/list":

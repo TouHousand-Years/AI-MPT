@@ -1,11 +1,11 @@
 ---
 name: openmpt-mcp
-description: Operate the OpenMPT Pattern MCP tools to read the current Sequence order, switch the bound Pattern with approval, inspect Score Context, compose or revise tracker cells in a retained Agent Edit Session, and finish with handoff. Use when an OpenMPT document is connected and the task concerns the Sequence order or reading or editing its bound Tracker Pattern; do not use for UI automation, audio review, project-wide settings, or unsupported non-Pattern operations.
+description: Operate the OpenMPT Pattern MCP tools to read or reorder the current Sequence order, switch to or create the bound Pattern with approval, inspect Score Context, compose or revise tracker cells in a retained Agent Edit Session, and finish with handoff. Use when an OpenMPT document is connected and the task concerns the Sequence order or reading or editing its bound Tracker Pattern; do not use for UI automation, audio review, project-wide settings, or unsupported non-Pattern operations.
 ---
 
 # OpenMPT MCP
 
-Use the connected Pattern capability as a one-Pattern-at-a-time proposal workflow. The tools edit a private candidate; a frozen proposal is applied only after human approval or a saved automatic-accept preference, and every result must be read for its actual `status`.
+Use the connected Pattern capability as a one-Pattern-at-a-time proposal workflow. Tracker-cell tools edit a private candidate; a frozen proposal is applied only after human approval or a saved automatic-accept preference. `reorder_pattern_order` is the explicit structural exception: it applies a validated permutation immediately inside a retained session. Read every result for its actual `status`.
 
 ## Tracker Pattern basics
 
@@ -36,6 +36,7 @@ Load only the files needed for the current branch:
   - `context.format.name` is always one of those five: a source format OpenMPT does not model natively (MED, DBM, OKT, …) is reported under the closest family, so there is no separate reference file for it.
 - For a tool call, read exactly that tool's file:
   - [`get_pattern_order`](references/get-pattern-order.md)
+  - [`reorder_pattern_order`](references/reorder-pattern-order.md)
   - [`switch_pattern`](references/switch-pattern.md)
   - [`get_pattern_context`](references/get-pattern-context.md)
   - [`replace_pattern_segment`](references/replace-pattern-segment.md)

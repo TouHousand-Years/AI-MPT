@@ -107,7 +107,7 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, process.stderr)
         return [json.loads(line) for line in process.stdout.splitlines()]
 
-    def test_initialize_and_seven_pattern_tools(self):
+    def test_initialize_and_eight_pattern_tools(self):
         replies = self.exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
                 "protocolVersion": "2025-11-25", "capabilities": {},
@@ -120,7 +120,7 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual({t["name"] for t in replies[1]["result"]["tools"]}, {
             "get_pattern_context", "replace_pattern_segment", "handoff_for_review",
             "abort_session", "release_occupancy",
-            "get_pattern_order", "switch_pattern",
+            "get_pattern_order", "reorder_pattern_order", "switch_pattern",
         })
 
     def test_switch_token_pins_document_until_failed_auto_apply_finishes_session(self):
@@ -275,10 +275,10 @@ class SidecarTests(unittest.TestCase):
                                  ["schemaFailure", "schemaFailure"])
 
     @unittest.skipUnless(os.name == "nt", "Windows pipe transport")
-    def test_all_seven_calls_translate_without_rewriting_arguments(self):
+    def test_all_eight_calls_translate_without_rewriting_arguments(self):
         arguments = {"session": "opaque", "cells": [{"row": 17, "cell": {"note": 61}}]}
         names = ["get_pattern_context", "replace_pattern_segment", "handoff_for_review",
-                 "abort_session", "release_occupancy", "get_pattern_order", "switch_pattern"]
+                 "abort_session", "release_occupancy", "get_pattern_order", "reorder_pattern_order", "switch_pattern"]
         replies = [{"ok": True}] + [{"ok": True, "echo": name} for name in names]
         with EndpointDouble(replies) as endpoint:
             results = self.exchange([call(name, arguments) for name in names],
