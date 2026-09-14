@@ -32,6 +32,39 @@ void AIPatternTests(const CString &fixture)
 	auto *doc = static_cast<CModDoc *>(theApp.OpenDocumentFile(fixture, FALSE));
 	if(!doc) throw std::runtime_error("Cannot load collaboration fixture");
 	{
+		auto &sf = doc->GetSoundFile();
+		const auto savedOrder = sf.Order();
+		sf.Order().assign(5, 0);
+		sf.Order()[1] = PATTERNINDEX_SKIP;
+		sf.Order()[3] = PATTERNINDEX_INVALID;
+		sf.Order()[4] = 999;
+		AI::PatternCapability cap(*doc, 0, {});
+		const auto order = cap.Call("get_pattern_order", AI::Json::object());
+		Require(OK(order), "Pattern order can be read without starting a session");
+		Require(!doc->AIOccupied() && !order.contains("session"), "Order inspection never acquires write occupancy");
+		Require(order["sequence"]["index"] == 0 && order["entries"].size() == 5, "Order reports current sequence and every entry");
+		Require(order["entries"][0]["pattern"] == 0 && order["entries"][2]["pattern"] == 0
+			&& order["entries"][2]["order"] == 2, "Repeated references preserve their order indices");
+		Require(order["entries"][0]["rows"] == 128 && order["entries"][0]["name"].is_string(), "Valid entries carry Pattern metadata");
+		Require(order["entries"][1]["kind"] == "skip" && order["entries"][3]["kind"] == "stop"
+			&& order["entries"][4]["kind"] == "invalid", "Skip, stop and invalid references remain distinguishable");
+		Require(order["unreferenced_patterns"].size() == 1 && order["unreferenced_patterns"][0]["pattern"] == 1,
+			"Valid unreferenced Patterns remain discoverable");
+		const auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(OK(cap.Call("get_pattern_order", AI::Json::object())) && doc->AIOccupied(), "Order inspection preserves an existing session");
+		cap.Call("abort_session", {{"session", token}});
+		const auto sequence = sf.Order.AddSequence();
+		Require(sequence != SEQUENCEINDEX_INVALID, "Fixture supports another sequence");
+		sf.Order.SetSequence(sequence);
+		sf.Order().assign(1, 1);
+		const auto changed = cap.Call("get_pattern_order", AI::Json::object());
+		Require(OK(changed) && changed["sequence"]["index"] == sequence && changed["entries"].size() == 1
+			&& changed["entries"][0]["pattern"] == 1, "Order inspection follows the current sequence");
+		sf.Order.SetSequence(0);
+		sf.Order.RemoveSequence(sequence);
+		sf.Order() = savedOrder;
+	}
+	{
 		AI::PatternCapability owner(*doc, 0, {});
 		const auto read = owner.Call("get_pattern_context", AI::Json::object());
 		Require(OK(read) && !doc->AIOccupied() && !read.contains("session"), "Short read releases occupancy");
@@ -248,6 +281,119 @@ void AIPatternTests(const CString &fixture)
 		changedSpecial["cells"][0]["cell"]["instrument"] = 1;
 		Require(!OK(cap.Call("replace_pattern_segment", changedSpecial)), "Unsupported special-note cell must remain byte-for-byte identical");
 		cap.ForceRelease(); cell = saved;
+	}
+	{
+		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 0), PatternCursor(7, 0, PatternCursor::lastColumn)));
+		const auto order = doc->GetSoundFile().Order();
+		const auto playOrder = doc->GetSoundFile().GetCurrentOrder();
+		const auto request = cap.Call("switch_pattern", {{"pattern", 1}});
+		Require(request.value("pending_approval", false), "Session-less Pattern switch waits for approval");
+		Require(cap.PendingSwitch() && !cap.PendingExpansion() && cap.Pattern() == 0, "Switch approval is distinct and does not rebind early");
+		cap.Tick(AI::PatternCapability::Clock::now() + std::chrono::hours(1));
+		Require(cap.PendingSwitch(), "Switch waiting pauses idle timeout");
+		Require(ErrorCode(cap.ResolveSwitch(false)) == "patternSwitchRejected" && cap.Pattern() == 0, "Declined switch preserves original binding");
+		Require(cap.Call("switch_pattern", {{"pattern", 1}}).value("pending_approval", false), "A declined switch can be requested again");
+		const auto switched = cap.ResolveSwitch(true);
+		Require(OK(switched) && switched["status"] == "switched" && switched["context"]["pattern"] == 1 && switched.contains("session"), "Approval returns fresh target context and session");
+		auto token = switched.at("session");
+		Require(cap.Pattern() == 1 && cap.Occupied(), "Approval binds the target Pattern");
+		const auto same = cap.Call("switch_pattern", {{"pattern", 1}, {"session", token}});
+		Require(OK(same) && same["status"] == "unchanged" && same["session"] == token, "Same target is an authenticated no-op");
+		Require(!OK(cap.Call("switch_pattern", {{"pattern", 0}})), "Occupied switching requires a token");
+		Require(ErrorCode(cap.Call("switch_pattern", {{"pattern", 0}, {"session", "old-token"}})) == "occupancyLost", "Old token cannot switch");
+		Require(!OK(cap.Call("switch_pattern", {{"pattern", 999}, {"session", token}})) && cap.Pattern() == 1, "Invalid target cannot replace current binding");
+		Require(!OK(cap.Call("switch_pattern", {{"pattern", 65536}, {"session", token}})) && !cap.PendingSwitch(), "Oversized Pattern indices cannot wrap to an existing target");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 2, 55))), "Switch grants channels outside old selection");
+		Require(ErrorCode(cap.Call("switch_pattern", {{"pattern", 0}, {"session", token}})) == "candidateExists", "Unsubmitted edits block switch");
+		Require(OK(cap.Call("handoff_for_review", {{"session", token}})), "Switched Pattern freezes its own proposal");
+		Require(!OK(cap.Call("switch_pattern", {{"pattern", 0}})) && cap.Pattern() == 1, "Pending proposal blocks switch");
+		Require(OK(cap.Reject()), "Rejection clears switched proposal");
+		cap.Configure(300, false, true);
+		const auto automatic = cap.Call("switch_pattern", {{"pattern", 0}});
+		Require(OK(automatic) && automatic["status"] == "switched" && !cap.PendingSwitch(), "Always-allow automatically approves a legal switch");
+		token = automatic.at("session");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 2, 57))), "Automatic switch also grants the whole Pattern");
+		cap.Call("abort_session", {{"session", token}});
+		cap.Configure(300, false, false);
+		Require(cap.Call("switch_pattern", {{"pattern", 1}}).value("pending_approval", false), "Manual preference restored");
+		cap.ForceRelease();
+		Require(!cap.PendingSwitch() && ErrorCode(cap.ResolveSwitch(true)) == "occupancyLost", "Forced release terminates switch waiting");
+		Require(doc->GetSoundFile().Order() == order && doc->GetSoundFile().GetCurrentOrder() == playOrder, "Switching never edits Order or playback position");
+	}
+	{
+		auto &sf = doc->GetSoundFile();
+		const auto p0 = *sf.Patterns[0].GetpModCommand(0, 1);
+		const auto p1 = *sf.Patterns[1].GetpModCommand(0, 2);
+		doc->GetPatternUndo().ClearUndo();
+		AI::PatternCapability cap(*doc, 0, {});
+		auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 1, 58))), "Prepare a proposal with default manual acceptance");
+		const auto manual = cap.Call("handoff_for_review", {{"session", token}});
+		Require(OK(manual) && manual["status"] == "pending_review" && cap.HasProposal()
+			&& *sf.Patterns[0].GetpModCommand(0, 1) == p0, "Default handoff stays pending and leaves document unchanged");
+		const auto enabled = cap.Configure(300, false, true, true);
+		Require(OK(enabled) && enabled["status"] == "applied" && !cap.HasProposal(), "Enabling always-accept immediately applies an existing proposal");
+		Require(sf.Patterns[0].GetpModCommand(0, 1)->note == 58 && *sf.Patterns[1].GetpModCommand(0, 2) == p1, "First apply changes only Pattern zero");
+		token = cap.Call("switch_pattern", {{"pattern", 1}}).at("session");
+		Require(OK(cap.Call("replace_pattern_segment", Segment(token, 2, 60))), "Edit the next Pattern after applying the first");
+		const auto automatic = cap.Call("handoff_for_review", {{"session", token}});
+		Require(OK(automatic) && automatic["status"] == "applied" && !cap.HasProposal() && !cap.Occupied(), "Later handoffs automatically apply and end occupancy");
+		Require(sf.Patterns[0].GetpModCommand(0, 1)->note == 58 && sf.Patterns[1].GetpModCommand(0, 2)->note == 60, "Both independently committed Patterns persist");
+		Require(doc->GetPatternUndo().Undo() == 1 && *sf.Patterns[1].GetpModCommand(0, 2) == p1
+			&& sf.Patterns[0].GetpModCommand(0, 1)->note == 58, "One Undo restores only the most recently submitted Pattern");
+		Require(doc->GetPatternUndo().Undo() == 0 && *sf.Patterns[0].GetpModCommand(0, 1) == p0, "Earlier Pattern has its own Undo step");
+		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		const auto empty = cap.Call("handoff_for_review", {{"session", token}});
+		Require(!OK(empty) && ErrorCode(empty) == "emptyProposal" && empty["status"] == "pending_review" && cap.HasProposal(), "Failed empty automatic apply explicitly retains pending proposal");
+		cap.Reject();
+		cap.Configure(300, false, true, false);
+		token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		cap.Call("replace_pattern_segment", Segment(token, 2, 61));
+		cap.Call("handoff_for_review", {{"session", token}});
+		const auto original = *sf.Patterns[1].GetpModCommand(0, 0);
+		sf.Patterns[1].GetpModCommand(0, 0)->note++;
+		const auto revision = doc->AIRevision();
+		const auto stale = cap.Configure(300, false, true, true);
+		Require(!OK(stale) && ErrorCode(stale) == "stale" && stale["status"] == "pending_review" && cap.HasProposal()
+			&& doc->AIRevision() == revision, "Enabling auto-accept retains stale proposal without document changes");
+		*sf.Patterns[1].GetpModCommand(0, 0) = original;
+		cap.Reject();
+		cap.Configure(300, false, false, false);
+		Require(cap.Call("switch_pattern", {{"pattern", 0}}).value("pending_approval", false), "Switch approval can wait before enabling its preference");
+		const auto allowed = cap.Configure(300, false, true, false);
+		Require(OK(allowed) && allowed["status"] == "switched" && allowed.contains("session") && cap.Pattern() == 0, "Enabling always-switch immediately resolves pending switch");
+		cap.ForceRelease();
+	}
+	{
+		auto &sf = doc->GetSoundFile();
+		const auto target = sf.Patterns.Duplicate(1);
+		Require(target != PATTERNINDEX_INVALID, "Create isolated switch revalidation target");
+		AI::PatternCapability cap(*doc, 0, {});
+		const auto token = cap.Call("get_pattern_context", {{"occupy", true}}).at("session");
+		Require(cap.Call("switch_pattern", {{"pattern", target}, {"session", token}}).value("pending_approval", false), "Target exists when switch is requested");
+		sf.Patterns.Remove(target);
+		const auto disappeared = cap.ResolveSwitch(true);
+		Require(!OK(disappeared) && cap.Pattern() == 0 && cap.Occupied(), "Approval revalidates target and retains original binding on failure");
+		Require(OK(cap.Call("get_pattern_context", {{"session", token}})), "Failed switch preserves source token");
+		Require(cap.Call("switch_pattern", {{"pattern", 1}, {"session", token}}).value("pending_approval", false), "Retained session can request another target after failure");
+		const auto switched = cap.ResolveSwitch(true);
+		Require(OK(switched) && switched["session"] != token, "Approved rebind replaces token");
+		const auto newToken = switched.at("session");
+		Require(ErrorCode(cap.Call("get_pattern_context", {{"session", token}})) == "occupancyLost", "Previous Pattern token cannot read new candidate");
+		auto lastRow = Segment(newToken, 3, 59);
+		lastRow["first_row"] = 127;
+		lastRow["row_count"] = 1;
+		lastRow["cells"][0]["row"] = 127;
+		Require(OK(cap.Call("replace_pattern_segment", lastRow)), "Full Pattern authorization includes final row and channel");
+		cap.Call("handoff_for_review", {{"session", newToken}});
+		const auto before = cap.Review();
+		const auto revision = doc->AIRevision();
+		const auto undo = doc->GetPatternUndo().GetUndoName();
+		const auto failure = cap.Apply(true, true);
+		Require(!OK(failure) && ErrorCode(failure) == "commitFailed" && failure["status"] == "pending_review"
+			&& cap.Review() == before && doc->AIRevision() == revision && doc->GetPatternUndo().GetUndoName() == undo,
+			"Simulated precommit failure leaves switched proposal pending with revision and Undo intact");
+		cap.Reject();
 	}
 	doc->SetModified(false);
 	doc->OnCloseDocument();

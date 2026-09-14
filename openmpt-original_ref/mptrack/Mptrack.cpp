@@ -1642,6 +1642,19 @@ BOOL CTrackApp::InitInstanceImpl(CMPTCommandLineInfo &cmdInfo)
 		}
 		return FALSE;
 	}
+	if(const wchar_t *fixture = _wgetenv(L"OPENMPT_PIANOROLL_REGRESSION_FIXTURE"))
+	{
+		const wchar_t *report = _wgetenv(L"OPENMPT_AI_TEST_REPORT");
+		try
+		{
+			Test::PianoRollRealProjectTests(fixture);
+			if(report) std::ofstream(report) << "PASS\n";
+		} catch(const std::exception &error)
+		{
+			if(report) std::ofstream(report) << "FAIL: " << error.what() << "\n";
+		}
+		return FALSE;
+	}
 #endif
 	AI::Start(*pMainFrame);
 	pMainFrame->UpdateDocumentCount();

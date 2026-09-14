@@ -605,12 +605,17 @@ void CCtrlPatterns::OnActivatePage(LPARAM lParam)
 		SetCurrentInstrument(nIns);
 	}
 
+	// A valid Pattern or Order payload is deliberate human navigation; the
+	// restore path (no such payload, typically lParam == -1) must not let a
+	// pending AI switch target override it.
+	bool explicitTarget = false;
 	if(!(lParam & 0x80000000))
 	{
 		// Pattern item
 		auto pat = static_cast<PATTERNINDEX>(lParam & 0xFFFF);
 		if(m_sndFile.Patterns.IsValidIndex(pat))
 		{
+			explicitTarget = true;
 			for(SEQUENCEINDEX seq = 0; seq < m_sndFile.Order.GetNumSequences(); seq++)
 			{
 				if(ORDERINDEX ord = m_sndFile.Order(seq).FindOrder(pat); ord != ORDERINDEX_INVALID)
@@ -634,6 +639,7 @@ void CCtrlPatterns::OnActivatePage(LPARAM lParam)
 			const auto &order = Order();
 			if(ord < order.size())
 			{
+				explicitTarget = true;
 				m_OrderList.SetCurSel(ord);
 				SetCurrentPattern(order[ord]);
 			}
@@ -656,7 +662,21 @@ void CCtrlPatterns::OnActivatePage(LPARAM lParam)
 			patternViewState.initialOrder = ORDERINDEX_INVALID;
 		}
 
-		patternViewState.nPattern = static_cast<PATTERNINDEX>(SendViewMessage(VIEWMSG_GETCURRENTPATTERN));
+		// An approved AI Pattern switch is restored from the page that has no live
+		// Patterns view; the freshly created view starts at Pattern 0 and would
+		// otherwise discard the target here before the state even reaches
+		// VIEWMSG_LOADSTATE. Honor the dedicated one-shot target instead, and let
+		// explicit Pattern/Order navigation discard it: the Agent binding is not
+		// affected when the human deliberately moves the UI.
+		if(!explicitTarget && patternViewState.switchRestore != PATTERNINDEX_INVALID
+			&& m_sndFile.Patterns.IsValidPat(patternViewState.switchRestore))
+		{
+			patternViewState.nPattern = patternViewState.switchRestore;
+		} else
+		{
+			patternViewState.nPattern = static_cast<PATTERNINDEX>(SendViewMessage(VIEWMSG_GETCURRENTPATTERN));
+		}
+		patternViewState.switchRestore = PATTERNINDEX_INVALID;
 		SendViewMessage(VIEWMSG_LOADSTATE, (LPARAM)&patternViewState);
 
 		SwitchToView();

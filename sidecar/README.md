@@ -1,6 +1,6 @@
 # Pattern MCP Sidecar
 
-Status: implemented (issues 30 and 31); verified with the official MCP Inspector CLI.
+Status: implemented (issues 30 and 31, plus the cross-Pattern order and switch slice); verified with the official MCP Inspector CLI.
 Label: triage
 
 `openmpt_mcp.py` implements issue 31 under issue 26: it maps
@@ -12,7 +12,11 @@ document liveness and executes capability calls through the issue-29 facade.
 There is no foreground-document fallback. For normal Codex use, the owner can
 explicitly publish the active document from OpenMPT's AI / MCP panel; the
 long-running Sidecar reads that current-user target file and attaches to the
-exact published lifetime identities.
+exact published lifetime identities. The translator also exposes the
+cross-Pattern slice: `get_pattern_order` reads the current Sequence order
+through the app without requesting occupancy, and `switch_pattern` requests or
+performs an approved rebinding to another Pattern while the connection keeps
+one retained session.
 
 ## Run and test
 
@@ -24,7 +28,7 @@ python sidecar/openmpt_mcp.py --help
 ```
 
 The process tests launch the Sidecar over stdin/stdout and use an independent
-scripted Windows named-pipe peer. They cover all five translations, explicit
+scripted Windows named-pipe peer. They cover all seven translations, explicit
 and published-target attachment, guarded target switching, error-layer
 preservation, fragmented replies, rejected attachment, disconnect without
 mutation replay, and rejection of remote pipe names.
@@ -38,7 +42,7 @@ $env:OPENMPT_RUN_NATIVE_INTEGRATION = '1'
 python -m unittest sidecar.test_native_integration -v
 ```
 
-It drives all five tools through the running app, walks the guided failure
+It drives all seven tools through the running app, walks the guided failure
 cases (`notAttached`, `documentGone`, `owningThreadRequired`, `instanceGone`),
 and asserts from the integration trace that no AI IPC path executed on the
 realtime audio callback while playback and IPC traffic ran concurrently.
@@ -60,7 +64,7 @@ the bare `--` are Inspector's own flags (`--method`, `--tool-name`,
 `--tool-arg`, `--format`), selecting the MCP operation to run. In the launch
 command, `--cli` selects Inspector's CLI mode and `python` plus the absolute
 script path launch the Sidecar as the MCP server. `tools/list` returns exactly
-the five Pattern-mode tools; `tools/call get_pattern_context` against the
+the seven Pattern-mode tools; `tools/call get_pattern_context` against the
 running app with the issue-28 fixture open returned the real Score Context in
 `structuredContent`.
 
@@ -116,7 +120,7 @@ documents does not require editing or restarting Codex:
 1. Open the document and its Patterns tab in OpenMPT.
 2. Open the **AI / MCP** panel.
 3. Click **Connect active doc to Codex**.
-4. Use the five Pattern tools from the existing Codex task.
+4. Use the seven Pattern tools from the existing Codex task.
 
 The button atomically publishes the exact pipe, application-lifetime ID,
 document-lifetime ID, and a fresh publication generation to
@@ -131,6 +135,13 @@ when it knows retained work is active; only `handoff_for_review`,
 identity. The newly published target is picked up by the next call after the
 old work ends. Re-publishing the same document creates a new generation, which
 is an explicit request to clear a latched attachment error and reconnect.
+
+A successful `switch_pattern` that returns a `session` token—`status: switched`,
+or `status: unchanged` carrying the retained token—counts as retained work, so
+the Sidecar pins the published document until the retained session ends. A
+session-less `status: unchanged` leaves retention unchanged. A
+`handoff_for_review` that returns `status: pending_review` ends that retention
+even when `ok` is false, because occupancy has ended on the app side.
 
 The target file is not automatic foreground tracking: opening or focusing a
 different document never changes it. Multiple OpenMPT instances share the
@@ -178,7 +189,8 @@ The app returns an object with boolean `ok`, and on failure an `error` object
 with `layer`, `code`, and diagnostic fields. The Sidecar carries the result
 unchanged in `structuredContent`. App errors such as `documentGone`,
 `owningThreadRequired`, occupancy loss, stale and cell validation failures are
-not interpreted or retargeted. Transport disconnect becomes `instanceGone`;
+not rewritten or retargeted; the `status` field is used only to track the
+retained-session lifecycle. Transport disconnect becomes `instanceGone`;
 malformed framing/results become `schemaFailure` and close the connection.
 
 The app pipe accepts multiple simultaneous local connections. Their envelopes
@@ -186,7 +198,10 @@ are queued and dispatched deterministically on the UI thread, so attached
 clients can perform one-shot read-only calls without competing for the pipe.
 An `occupy=true` read claims the single retained session for that connection;
 until it releases or hands off the session, calls from other connections receive
-`busy`. Attaching or disconnecting a read-only client never steals or releases
+`busy`. A successful `switch_pattern` keeps that same retained session, now
+bound to the target Pattern with a fresh token. `get_pattern_order` is always
+available: it is a session-less read that never claims or leaks occupancy.
+Attaching or disconnecting a read-only client never steals or releases
 another connection's retained state.
 
 One extension exists for diagnostics: a call envelope with `"direct":true` is
@@ -195,13 +210,19 @@ owning-thread guard rejects it with `owningThreadRequired`, making the
 issue-24 dispatch seam observable from the transport. The Sidecar never sends
 this flag; only `probe.py` does.
 
-The five tool schemas are in `openmpt_mcp.py`. Pattern indices are app-owned;
-there is no Pattern selector on this surface. Ranges and channels are zero-based.
+The seven tool schemas are in `openmpt_mcp.py`. Pattern indices are app-owned
+and zero-based; `switch_pattern` is the only way to change the bound Pattern,
+and manual navigation in OpenMPT never rebinds it. Ranges and channels are also
+zero-based.
 Segment entries use absolute row indices with all six raw cell fields; omitted
 rows represent empty desired cells. The app alone validates musical semantics,
 format constraints, preservation and envelope approvals.
 
-An expansion request may remain blocked on the pipe while the app's non-modal
-UI waits for its human decision. The broker remains able to service human
-force-release, app shutdown, and document closure during that wait. The
-Sidecar does not invent a separate occupancy timer, lease, or project state.
+An expansion or switch request may remain blocked on the pipe while the app's
+non-modal UI waits for its human decision. The app-internal `pending_approval`
+marker holds the queued request; the client call completes only when the
+decision arrives, with the final tool result (an approved mutation or a typed
+rejection). The marker itself is never returned to the MCP client. The broker
+remains able to service human force-release, app shutdown, and document closure
+during that wait. The Sidecar does not invent a separate occupancy timer,
+lease, or project state.

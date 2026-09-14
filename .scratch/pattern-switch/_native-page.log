@@ -1,0 +1,14 @@
+test_manual_switch_and_enable_automatic_acceptance (sidecar.test_native_integration.NativeIntegrationTests.test_manual_switch_and_enable_automatic_acceptance) ... FAIL
+
+======================================================================
+FAIL: test_manual_switch_and_enable_automatic_acceptance (sidecar.test_native_integration.NativeIntegrationTests.test_manual_switch_and_enable_automatic_acceptance)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_native_integration.py", line 113, in test_manual_switch_and_enable_automatic_acceptance
+    self.assertEqual(read["context"]["pattern"], 1)
+AssertionError: 0 != 1
+
+----------------------------------------------------------------------
+Ran 1 test in 13.211s
+
+FAILED (failures=1)

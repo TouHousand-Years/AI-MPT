@@ -23,6 +23,8 @@ Json Failure(const char *code, const char *reason, const char *layer)
 
 // Volume column values range 0..64 in every supported module format.
 constexpr int MaxVolume = 64;
+// Duplicate order indices address one Pattern, so a switch binds the Pattern, not a single occurrence.
+constexpr const char *SwitchRelationship = "Repeated order references address the same Pattern; switching binds the Pattern, not one order occurrence.";
 
 static std::string Utf8(const mpt::ustring &value) { return mpt::ToCharset(mpt::Charset::UTF8, value); }
 static const char *NoteKind(ModCommand::NOTE note)
@@ -63,10 +65,19 @@ PatternCapability::PatternCapability(CModDoc &document, PATTERNINDEX pattern, st
 	: m_doc(document), m_thread(GetCurrentThreadId()), m_pattern(pattern), m_selection(selection) {}
 PatternCapability::~PatternCapability() { ForceRelease(); }
 
-void PatternCapability::Configure(unsigned seconds, bool alwaysApprove)
+Json PatternCapability::Configure(unsigned seconds, bool rangeAlways, bool switchAlways, bool autoAccept)
 {
+	const bool switchEnabled = switchAlways && !m_alwaysSwitch;
+	const bool acceptEnabled = autoAccept && !m_alwaysAccept;
 	m_timeout = std::clamp(seconds, 1u, 3600u);
-	m_alwaysApprove = alwaysApprove;
+	m_alwaysApprove = rangeAlways;
+	m_alwaysSwitch = switchAlways;
+	m_alwaysAccept = autoAccept;
+	// Turning a preference on resolves work that was already waiting on it. A failed
+	// resolution keeps the work pending; later calls never silently retry it.
+	if(switchEnabled && m_pendingSwitch) return ResolveSwitch(true);
+	if(acceptEnabled && m_proposal) return Apply();
+	return {{"ok", true}};
 }
 void PatternCapability::ForceRelease()
 {
@@ -75,36 +86,56 @@ void PatternCapability::ForceRelease()
 	m_ownsOccupancy = false;
 	m_token.clear();
 	m_pending.reset();
+	m_pendingSwitch.reset();
 	if(!m_proposal) { m_candidate.clear(); m_baseline.clear(); }
 }
 void PatternCapability::Tick(Clock::time_point now)
 {
-	if(m_retained && !m_pending && now >= m_deadline) ForceRelease();
+	if(m_retained && !m_pending && !m_pendingSwitch && now >= m_deadline) ForceRelease();
 }
 void PatternCapability::Capture()
 {
+	Adopt(CapturePattern(m_pattern, m_selection));
+}
+PatternCapability::CaptureState PatternCapability::CapturePattern(PATTERNINDEX pattern, std::optional<PatternRect> selection) const
+{
 	auto &sf = m_doc.GetSoundFile();
-	if(!sf.Patterns.IsValidPat(m_pattern)) throw std::invalid_argument("Bound Pattern no longer exists");
-	m_rows = sf.Patterns[m_pattern].GetNumRows();
-	m_channels = sf.GetNumChannels();
-	const auto *first = sf.Patterns[m_pattern].GetpModCommand(0, 0);
-	m_baseline.assign(first, first + size_t(m_rows) * m_channels);
-	m_candidate = m_baseline;
-	m_envelope = m_selection.value_or(PatternRect(PatternCursor(0, 0), PatternCursor(m_rows - 1, m_channels - 1, PatternCursor::lastColumn)));
-	m_envelope.Sanitize(m_rows, m_channels);
-	m_signature = Signature();
+	if(!sf.Patterns.IsValidPat(pattern)) throw std::invalid_argument("Bound Pattern no longer exists");
+	CaptureState state;
+	state.pattern = pattern;
+	state.rows = sf.Patterns[pattern].GetNumRows();
+	state.channels = sf.GetNumChannels();
+	const auto *first = sf.Patterns[pattern].GetpModCommand(0, 0);
+	state.baseline.assign(first, first + size_t(state.rows) * state.channels);
+	state.candidate = state.baseline;
+	state.envelope = selection.value_or(PatternRect(PatternCursor(0, 0), PatternCursor(state.rows - 1, state.channels - 1, PatternCursor::lastColumn)));
+	state.envelope.Sanitize(state.rows, state.channels);
+	state.signature = Signature(pattern);
 	GUID id{};
 	if(FAILED(CoCreateGuid(&id))) throw std::runtime_error("Cannot create session identity");
 	wchar_t text[40]{};
 	StringFromGUID2(id, text, 40);
-	m_token = Utf8(mpt::ToUnicode(text));
+	state.token = Utf8(mpt::ToUnicode(text));
+	return state;
+}
+void PatternCapability::Adopt(CaptureState state)
+{
+	m_pattern = state.pattern;
+	m_rows = state.rows;
+	m_channels = state.channels;
+	m_envelope = state.envelope;
+	m_baseline = std::move(state.baseline);
+	m_candidate = std::move(state.candidate);
+	m_signature = std::move(state.signature);
+	m_token = std::move(state.token);
 }
 
-std::string PatternCapability::Signature() const
+std::string PatternCapability::Signature() const { return Signature(m_pattern); }
+std::string PatternCapability::Signature(PATTERNINDEX patternIndex) const
 {
 	const auto &sf = m_doc.GetSoundFile();
-	if(!sf.Patterns.IsValidPat(m_pattern)) return {};
-	const auto &pattern = sf.Patterns[m_pattern];
+	if(!sf.Patterns.IsValidPat(patternIndex)) return {};
+	const auto &pattern = sf.Patterns[patternIndex];
 	std::ostringstream data(std::ios::binary);
 	// Exact internal dependency record, never sent to the Agent. No hash collisions.
 	data << sf.GetType() << ':' << sf.GetNumChannels() << ':' << pattern.GetNumRows() << ':'
@@ -137,21 +168,27 @@ std::string PatternCapability::Signature() const
 
 Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json &args) const
 {
+	return ContextFor(m_pattern, m_rows, m_channels, cells, args);
+}
+
+// Uses an explicit state so a reply can be prepared before a new binding is adopted.
+Json PatternCapability::ContextFor(PATTERNINDEX patternIndex, ROWINDEX rowCount, CHANNELINDEX channelCount, const std::vector<ModCommand> &cells, const Json &args) const
+{
 	const auto &sf = m_doc.GetSoundFile();
-	int row = 0, rows = m_rows, channel = 0, channels = m_channels;
+	int row = 0, rows = rowCount, channel = 0, channels = channelCount;
 	if(args.contains("range"))
 	{
 		const auto &range = args.at("range");
-		row = Integer(range.at("first_row"), 0, m_rows - 1);
-		rows = Integer(range.at("row_count"), 1, m_rows - row);
-		channel = Integer(range.at("first_channel"), 0, m_channels - 1);
-		channels = Integer(range.at("channel_count"), 1, m_channels - channel);
+		row = Integer(range.at("first_row"), 0, rowCount - 1);
+		rows = Integer(range.at("row_count"), 1, rowCount - row);
+		channel = Integer(range.at("first_channel"), 0, channelCount - 1);
+		channels = Integer(range.at("channel_count"), 1, channelCount - channel);
 	}
 	Json sparse = Json::array(), instruments = Json::array(), samples = Json::array();
 	for(int r = row; r < row + rows; ++r)
 		for(int c = channel; c < channel + channels; ++c)
 		{
-			const auto &cell = cells[size_t(r) * m_channels + c];
+			const auto &cell = cells[size_t(r) * channelCount + c];
 			if(SameRaw(cell, ModCommand{})) continue;
 			sparse.push_back({{"row", r}, {"channel", c}, {"raw", Raw(cell)}, {"note_kind", NoteKind(cell.note)},
 				{"note_name", Utf8(sf.GetNoteName(cell.note, cell.instr))}, {"volume_command_name", SemanticName(cell.volcmd)}, {"effect_command_name", SemanticName(cell.command)}, {"instrument_reference", cell.instr}});
@@ -161,8 +198,8 @@ Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json
 	for(SAMPLEINDEX i = 1; i <= sf.GetNumSamples(); ++i)
 		samples.push_back({{"id", i}, {"name", Utf8(mpt::ToUnicode(sf.GetCharsetInternal(), sf.GetSampleName(i)))}, {"frames", sf.GetSample(i).nLength}});
 	const auto &spec = sf.GetModSpecifications();
-	const auto &pattern = sf.Patterns[m_pattern];
-	return {{"pattern", m_pattern}, {"rows", m_rows}, {"channels", m_channels}, {"cells", sparse},
+	const auto &pattern = sf.Patterns[patternIndex];
+	return {{"pattern", patternIndex}, {"rows", rowCount}, {"channels", channelCount}, {"cells", sparse},
 		{"range", {{"first_row", row}, {"row_count", rows}, {"first_channel", channel}, {"channel_count", channels}}},
 		{"timing", {{"default_tempo", sf.Order().GetDefaultTempo().ToDouble()}, {"default_speed", sf.Order().GetDefaultSpeed()},
 			{"tempo_mode", int(sf.m_nTempoMode)}, {"rows_per_beat", pattern.GetOverrideSignature() ? pattern.GetRowsPerBeat() : sf.m_nDefaultRowsPerBeat},
@@ -170,6 +207,61 @@ Json PatternCapability::Context(const std::vector<ModCommand> &cells, const Json
 		{"format", {{"name", spec.fileExtension}, {"note_min", spec.noteMin}, {"note_max", spec.noteMax}, {"note_off", spec.hasNoteOff},
 			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? MaxVolume : 0}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
 		{"instruments", instruments}, {"samples", samples}};
+}
+
+Json PatternCapability::PatternOrder() const
+{
+	const auto &sf = m_doc.GetSoundFile();
+	const auto &sequence = sf.Order();
+	const auto patternInfo = [&](PATTERNINDEX pattern)
+	{
+		const auto &reference = sf.Patterns[pattern];
+		return Json{{"pattern", pattern}, {"name", Utf8(mpt::ToUnicode(sf.GetCharsetInternal(), reference.GetName()))}, {"rows", reference.GetNumRows()}};
+	};
+	Json entries = Json::array();
+	for(ORDERINDEX order = 0; order < sequence.GetLength(); ++order)
+	{
+		const PATTERNINDEX pattern = sequence[order];
+		Json entry{{"order", order}, {"kind", "pattern"}, {"pattern", pattern}};
+		if(sf.Patterns.IsValidPat(pattern))
+		{
+			const auto info = patternInfo(pattern);
+			entry["name"] = info["name"];
+			entry["rows"] = info["rows"];
+		} else if(pattern == PATTERNINDEX_SKIP) entry["kind"] = "skip";
+		else if(pattern == PATTERNINDEX_INVALID) entry["kind"] = "stop";
+		else entry["kind"] = "invalid";
+		entries.push_back(std::move(entry));
+	}
+	Json unreferenced = Json::array();
+	for(PATTERNINDEX pattern = 0; pattern < sf.Patterns.Size(); ++pattern)
+		if(sf.Patterns.IsValidPat(pattern) && sequence.FindOrder(pattern) == ORDERINDEX_INVALID) unreferenced.push_back(patternInfo(pattern));
+	return {{"ok", true},
+		{"sequence", {{"index", sf.Order.GetCurrentSequenceIndex()}, {"name", Utf8(sequence.GetName())}}},
+		{"entries", entries}, {"unreferenced_patterns", unreferenced}};
+}
+
+Json PatternCapability::PatternInfo(PATTERNINDEX pattern) const
+{
+	const auto &sf = m_doc.GetSoundFile();
+	Json info{{"pattern", pattern}};
+	if(sf.Patterns.IsValidPat(pattern))
+	{
+		const auto &reference = sf.Patterns[pattern];
+		info["name"] = Utf8(mpt::ToUnicode(sf.GetCharsetInternal(), reference.GetName()));
+		info["rows"] = reference.GetNumRows();
+	}
+	return info;
+}
+
+Json PatternCapability::OrderReferences(PATTERNINDEX pattern) const
+{
+	const auto &sequence = m_doc.GetSoundFile().Order();
+	Json orders = Json::array();
+	for(ORDERINDEX order = 0; order < sequence.GetLength(); ++order)
+		if(sequence[order] == pattern) orders.push_back(order);
+	return {{"pattern", pattern}, {"orders", orders}, {"count", orders.size()}, {"repeated", orders.size() > 1},
+		{"message", orders.size() > 1 ? "All listed order indices address the same Pattern." : "This Pattern has a single order reference."}};
 }
 
 Json PatternCapability::Call(const std::string &tool, const Json &args)
@@ -183,10 +275,11 @@ Json PatternCapability::Call(const std::string &tool, const Json &args)
 		~EndCall()
 		{
 			capability.m_callActive = false;
-			if(!capability.m_retained) capability.ForceRelease();
+			// A waiting switch (including a session-less one with a reservation) must survive the call.
+			if(!capability.m_retained && !capability.m_pending && !capability.m_pendingSwitch) capability.ForceRelease();
 		}
 	} end{*this};
-	// Sole reminder site for the five tools: results gain ending_reminder exactly once here.
+	// Sole reminder site for capability tool results: every result gains ending_reminder exactly once here.
 	return WithEndingReminder(Dispatch(tool, args));
 }
 
@@ -196,12 +289,16 @@ Json PatternCapability::Dispatch(const std::string &tool, const Json &args)
 	try
 	{
 		if(!args.is_object()) return Failure("schemaFailure", "Arguments must be an object");
-		if(tool != "get_pattern_context" && tool != "replace_pattern_segment" && tool != "handoff_for_review"
-			&& tool != "abort_session" && tool != "release_occupancy") return Failure("unsupported", "Unknown Pattern tool");
+		if(tool != "get_pattern_context" && tool != "get_pattern_order" && tool != "switch_pattern" && tool != "replace_pattern_segment"
+			&& tool != "handoff_for_review" && tool != "abort_session" && tool != "release_occupancy") return Failure("unsupported", "Unknown Pattern tool");
 		if(args.contains("occupy") && !args.at("occupy").is_boolean()) return Failure("schemaFailure", "occupy must be boolean");
-		if(args.contains("pattern") && (!args.at("pattern").is_number_integer() || args.at("pattern").get<int>() != static_cast<int>(m_pattern)))
+		if(tool != "switch_pattern" && args.contains("pattern") && (!args.at("pattern").is_number_integer() || args.at("pattern").get<int>() != static_cast<int>(m_pattern)))
 			return Failure("boundPatternViolation", "A session cannot read or write another Pattern");
+		// Order inspection is a session-less read: it never captures or occupies the document.
+		if(tool == "get_pattern_order") return PatternOrder();
 		if(m_pending) return Failure("approvalPending", "Resolve the pending expansion first");
+		if(m_pendingSwitch) return Failure("approvalPending", "Resolve the pending Pattern switch first");
+		if(tool == "switch_pattern") return Switch(args);
 		if(args.contains("session"))
 		{
 			if(!m_retained || args.at("session") != m_token) return Failure("occupancyLost", "Session ended or was released");
@@ -235,10 +332,11 @@ Json PatternCapability::Dispatch(const std::string &tool, const Json &args)
 		if(tool == "replace_pattern_segment") return Replace(args);
 		if(tool == "handoff_for_review")
 		{
-			auto result = Json{{"ok", true}, {"diff", Diff(m_baseline, m_candidate)}};
+			auto diff = Diff(m_baseline, m_candidate);
 			m_proposal = true;
 			ForceRelease();
-			return result;
+			if(m_alwaysAccept) return Apply();
+			return {{"ok", true}, {"status", "pending_review"}, {"diff", std::move(diff)}};
 		}
 		return Failure("unsupported", "Unknown Pattern tool");
 	} catch(const std::exception &)
@@ -372,6 +470,149 @@ Json PatternCapability::ResolveExpansion(bool approve)
 	return WithEndingReminder(Replace(args, true));
 }
 
+Json PatternCapability::Switch(const Json &args)
+{
+	auto &sf = m_doc.GetSoundFile();
+	if(!args.contains("pattern") || !args.at("pattern").is_number_integer())
+		return Failure("schemaFailure", "switch_pattern requires an integer pattern");
+	// Bounds-check the full JSON integer before narrowing; 65536 must never wrap to Pattern 0.
+	long long requested = 0;
+	try { requested = args.at("pattern").get<long long>(); }
+	catch(const std::exception &) { return Failure("validationFailure", "Target Pattern index is out of range"); }
+	if(requested < 0 || static_cast<unsigned long long>(requested) >= static_cast<unsigned long long>(sf.Patterns.Size())
+		|| !sf.Patterns.IsValidPat(static_cast<PATTERNINDEX>(requested)))
+		return Failure("validationFailure", "Target Pattern does not exist");
+	const PATTERNINDEX target = static_cast<PATTERNINDEX>(requested);
+	if(args.contains("session") && !args.at("session").is_string())
+		return Failure("schemaFailure", "session must be a string");
+	const bool authenticated = args.contains("session");
+	if(authenticated)
+	{
+		if(!m_retained || args.at("session").get<std::string>() != m_token)
+			return Failure("occupancyLost", "Session ended or was released");
+		if(Signature() != m_signature) { ForceRelease(); return Failure("stale", "Bound Pattern dependencies changed"); }
+	} else
+	{
+		if(m_retained) return Failure("occupancyLost", "Switching the bound Pattern requires its session token");
+		if(m_proposal) return Failure("busy", "Finish the existing proposal before switching");
+		if(m_doc.AIOccupied()) return Failure("busy", "Another AI session holds the document");
+	}
+	if(target == m_pattern)
+	{
+		Json result{{"ok", true}, {"status", "unchanged"}, {"source", PatternInfo(m_pattern)}, {"target", PatternInfo(target)},
+			{"order_references", {{"source", OrderReferences(m_pattern)}, {"target", OrderReferences(target)}}},
+			{"relationship", SwitchRelationship}};
+		if(authenticated)
+		{
+			m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
+			result["context"] = Context(m_candidate, Json::object());
+			result["session"] = m_token;
+		}
+		return result;
+	}
+	if(authenticated && !SameCells(m_candidate, m_baseline)) return Failure("candidateExists", "Handoff or abort edited candidates before switching");
+	SwitchRequest request;
+	request.source = m_pattern;
+	request.target = target;
+	request.sourceSignature = Signature();
+	request.token = m_token;
+	request.authenticated = authenticated;
+	if(!authenticated)
+	{
+		// Reserve ownership while waiting so another facade cannot take over the document.
+		m_doc.SetAIOccupied(true);
+		m_ownsOccupancy = true;
+	}
+	if(!m_alwaysSwitch)
+	{
+		m_pendingSwitch = std::move(request);
+		return {{"ok", true}, {"pending_approval", true}};
+	}
+	return PerformSwitch(request);
+}
+
+Json PatternCapability::PerformSwitch(const SwitchRequest &request)
+{
+	auto &sf = m_doc.GetSoundFile();
+	if(!sf.Patterns.IsValidPat(request.target))
+	{
+		if(!request.authenticated) ForceRelease();
+		return Failure("validationFailure", "Target Pattern disappeared while waiting");
+	}
+	CaptureState captured;
+	try
+	{
+		captured = CapturePattern(request.target, std::nullopt);
+	} catch(const std::exception &)
+	{
+		// A failed capture never replaced the source binding; only a session-less reservation needs cleanup.
+		if(!request.authenticated) ForceRelease();
+		return Failure("validationFailure", "Target Pattern cannot be captured");
+	}
+	// Build the complete reply from the temporary capture before adopting it, so a failed
+	// allocation cannot leave the original session half-replaced.
+	Json reply;
+	try
+	{
+		reply = Json{{"ok", true}, {"status", "switched"},
+			{"context", ContextFor(captured.pattern, captured.rows, captured.channels, captured.candidate, Json::object())},
+			{"session", captured.token}, {"source", PatternInfo(request.source)}, {"target", PatternInfo(request.target)},
+			{"order_references", {{"source", OrderReferences(request.source)}, {"target", OrderReferences(request.target)}}},
+			{"relationship", SwitchRelationship}};
+	} catch(const std::exception &)
+	{
+		if(!request.authenticated) ForceRelease();
+		return Failure("commitFailed", "Could not prepare the switch response");
+	}
+	m_doc.SetAIOccupied(true);
+	m_ownsOccupancy = true;
+	Adopt(std::move(captured));
+	m_retained = true;
+	m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
+	return reply;
+}
+
+Json PatternCapability::ResolveSwitch(bool approve)
+{
+	if(GetCurrentThreadId() != m_thread) return Failure("owningThreadRequired", "Use owning thread");
+	if(!m_pendingSwitch) return Failure("occupancyLost", "No pending Pattern switch");
+	SwitchRequest request = std::move(*m_pendingSwitch);
+	m_pendingSwitch.reset();
+	if(request.authenticated)
+	{
+		if(!m_retained || m_token != request.token) { ForceRelease(); return WithEndingReminder(Failure("occupancyLost", "Session ended while waiting")); }
+		if(Signature() != request.sourceSignature) { ForceRelease(); return WithEndingReminder(Failure("stale", "Source Pattern changed while waiting")); }
+	} else if(!m_ownsOccupancy || !m_doc.AIOccupied())
+	{
+		return WithEndingReminder(Failure("occupancyLost", "Reservation was released while waiting"));
+	}
+	if(!approve)
+	{
+		// A retained session keeps its binding and token; a session-less reservation is released.
+		if(request.authenticated) m_deadline = Clock::now() + std::chrono::seconds(m_timeout);
+		else ForceRelease();
+		return WithEndingReminder(Failure("patternSwitchRejected", "Owner declined the Pattern switch"));
+	}
+	return WithEndingReminder(PerformSwitch(request));
+}
+
+Json PatternCapability::SwitchRange() const
+{
+	if(!m_pendingSwitch) return Json::object();
+	const auto &request = *m_pendingSwitch;
+	const auto source = PatternInfo(request.source);
+	const auto target = PatternInfo(request.target);
+	return {{"source_pattern", request.source},
+		{"source_name", source.value("name", std::string{})},
+		{"target_pattern", request.target},
+		{"target_name", target.value("name", std::string{})},
+		{"target_rows", target.value("rows", 0)},
+		{"target_channels", m_doc.GetSoundFile().GetNumChannels()},
+		{"authenticated", request.authenticated},
+		{"order_references", {{"source", OrderReferences(request.source)}, {"target", OrderReferences(request.target)}}},
+		{"relationship", SwitchRelationship}};
+}
+
 Json PatternCapability::ExpansionRange() const
 {
 	if(!m_pending) return Json::object();
@@ -398,22 +639,24 @@ Json PatternCapability::Reject()
 
 Json PatternCapability::Apply(bool whole, bool simulateFailure)
 {
-	if(GetCurrentThreadId() != m_thread) return Failure("owningThreadRequired", "Use owning thread");
-	if(!whole) return Failure("unsupported", "Partial acceptance is unavailable");
-	if(!m_proposal) return Failure("noProposal", "No proposal available");
-	if(m_doc.AIOccupied()) return Failure("busy", "Release occupancy before Apply");
-	if(Signature() != m_signature) return Failure("stale", "Dependencies changed; request a fresh proposal");
+	// Every rejected attempt keeps the frozen proposal pending for the owner.
+	auto pending = [](Json result) { result["status"] = "pending_review"; return result; };
+	if(GetCurrentThreadId() != m_thread) return pending(Failure("owningThreadRequired", "Use owning thread"));
+	if(!whole) return pending(Failure("unsupported", "Partial acceptance is unavailable"));
+	if(!m_proposal) return pending(Failure("noProposal", "No proposal available"));
+	if(m_doc.AIOccupied()) return pending(Failure("busy", "Release occupancy before Apply"));
+	if(Signature() != m_signature) return pending(Failure("stale", "Dependencies changed; request a fresh proposal"));
 	for(size_t i = 0; i < m_candidate.size(); ++i)
 	{
 		auto result = Validate(m_baseline[i], m_candidate[i], static_cast<ROWINDEX>(i / m_channels));
-		if(!result["ok"].get<bool>()) return result;
+		if(!result["ok"].get<bool>()) return pending(std::move(result));
 	}
-	if(simulateFailure) return Failure("commitFailed", "Simulated precommit allocation failure");
-	if(SameCells(m_baseline, m_candidate)) return Failure("emptyProposal", "Proposal has no changes");
+	if(simulateFailure) return pending(Failure("commitFailed", "Simulated precommit allocation failure"));
+	if(SameCells(m_baseline, m_candidate)) return pending(Failure("emptyProposal", "Proposal has no changes"));
 	// Everything that can allocate for our result happens before native Undo preparation.
-	Json result{{"ok", true}};
+	Json result{{"ok", true}, {"status", "applied"}};
 	if(!m_doc.GetPatternUndo().PrepareUndo(m_pattern, 0, 0, m_channels, m_rows, "Apply AI proposal"))
-		return Failure("commitFailed", "Could not allocate native Undo snapshot");
+		return pending(Failure("commitFailed", "Could not allocate native Undo snapshot"));
 	{
 		CriticalSection guard;
 		std::copy(m_candidate.begin(), m_candidate.end(), m_doc.GetSoundFile().Patterns[m_pattern].GetpModCommand(0, 0));

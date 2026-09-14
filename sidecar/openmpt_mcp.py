@@ -35,7 +35,11 @@ TOOLS = [
                                     "row_count": {"type": "integer", "minimum": 1},
                                     "cells": {"type": "array", "items": object_schema({"row": INTEGER, "cell": CELL}, ("row", "cell"))}},
                                    ("session", "channel", "first_row", "row_count", "cells"))},
-    {"name": "handoff_for_review", "description": "Freeze the entire final proposal and release occupancy atomically. The human reviews and applies it. " + ENDING,
+    {"name": "get_pattern_order", "description": "Read the current Sequence order without requesting write occupancy: one entry per Order index in order, preserving duplicate, skip and stop markers, plus the number, name and row count of valid Patterns and valid Patterns not referenced by the Sequence.",
+     "inputSchema": object_schema({})},
+    {"name": "switch_pattern", "description": "Request a switch of the edit binding to the zero-based pattern, optionally authenticated by the session token of a retained session. Without a session the request waits for human approval in OpenMPT. Uncommitted candidate edits or a pending proposal must be applied, rejected or cancelled first. Approval re-captures the target and authorizes the whole Pattern (all rows and channels), returning a fresh session token. Duplicate order references address the same Pattern; each proposal and Undo touches exactly one Pattern. " + ENDING,
+     "inputSchema": object_schema({"session": SESSION, "pattern": dict(INTEGER, description="Zero-based target Pattern index.")}, ("pattern",))},
+    {"name": "handoff_for_review", "description": "Freeze the entire final proposal and release occupancy atomically. The frozen single-Pattern proposal may be applied automatically (status applied) or wait for human review (status pending_review); either way occupancy ends. " + ENDING,
      "inputSchema": object_schema({"session": SESSION}, ("session",))},
     {"name": "abort_session", "description": "Discard the whole candidate and release occupancy atomically. " + ENDING,
      "inputSchema": object_schema({"session": SESSION}, ("session",))},
@@ -136,10 +140,13 @@ class Sidecar:
 
     def update_session_state(self, name, result):
         if result.get("ok", False):
-            if name == "get_pattern_context" and isinstance(result.get("session"), str) and result["session"]:
+            if name in ("get_pattern_context", "switch_pattern") and isinstance(result.get("session"), str) and result["session"]:
                 self.retained_session = True
             elif name in ENDING_TOOLS:
                 self.retained_session = False
+        elif name == "handoff_for_review" and result.get("status") == "pending_review":
+            # The frozen proposal stays with the human, but the retained session has ended.
+            self.retained_session = False
         elif result.get("error", {}).get("code") in {"occupancyLost", "documentGone", "instanceGone"}:
             self.retained_session = False
 

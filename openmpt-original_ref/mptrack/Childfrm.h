@@ -45,6 +45,11 @@ struct PatternViewState
 	ORDERINDEX initialOrder = ORDERINDEX_INVALID;
 	std::bitset<PatternCursor::numColumns> visibleColumns;
 	bool initialized = false;
+	// One-shot target from an approved AI Pattern switch while the lower
+	// Patterns view is not live. The next Patterns activation consumes it
+	// instead of the Pattern implied by the current Order selection; explicit
+	// human navigation discards it. Never serialized.
+	PATTERNINDEX switchRestore = PATTERNINDEX_INVALID;
 
 	std::string Serialize() const;
 	void Deserialize(FileReader &f);

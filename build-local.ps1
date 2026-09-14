@@ -8,7 +8,7 @@ $msbuild = Join-Path $buildTools 'MSBuild\Current\Bin\MSBuild.exe'
 & $msbuild (Join-Path $projectRoot 'openmpt-original_ref\build\vs2022win10\OpenMPT.vcxproj') /m /nr:false /t:Build /p:Configuration=Debug /p:Platform=x64 /p:WindowsTargetPlatformVersion=10.0.26100.0 /v:minimal
 if($LASTEXITCODE -ne 0) { throw "Native build failed: $LASTEXITCODE" }
 if($Test) {
-    $aiEnvVars = 'OPENMPT_AI_TEST_FIXTURE', 'OPENMPT_AI_TEST_REPORT', 'OPENMPT_AI_DEMO_REPORT'
+    $aiEnvVars = 'OPENMPT_AI_TEST_FIXTURE', 'OPENMPT_PIANOROLL_REGRESSION_FIXTURE', 'OPENMPT_AI_TEST_REPORT', 'OPENMPT_AI_DEMO_REPORT'
     $savedEnv = @{}
     foreach($name in $aiEnvVars) { $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name) }
     $testReport = Join-Path $projectRoot '.scratch\ai-native-test.txt'
@@ -26,6 +26,17 @@ if($Test) {
         if($result.Trim() -ne 'PASS') { throw 'Native capability tests failed.' }
         if(-not (Test-Path -LiteralPath $demoReport)) { throw 'Capability tests passed but produced no demo report.' }
         Get-Content -LiteralPath $demoReport -Raw
+        $realProjectFixture = Join-Path $projectRoot 'test-fixtures\th04_15_betafinalmix.mptm'
+        if(Test-Path -LiteralPath $realProjectFixture) {
+            $env:OPENMPT_AI_TEST_FIXTURE = $null
+            $env:OPENMPT_PIANOROLL_REGRESSION_FIXTURE = $realProjectFixture
+            if(Test-Path -LiteralPath $testReport) { Remove-Item -LiteralPath $testReport }
+            Start-Process -FilePath (Join-Path $projectRoot 'openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\OpenMPT.exe') -ArgumentList '/noSysCheck','/noTests','/noPlugins','/noDls' -WindowStyle Hidden -Wait
+            if(-not (Test-Path -LiteralPath $testReport)) { throw 'Real-project Piano Roll regression produced no report.' }
+            $realProjectResult = Get-Content -LiteralPath $testReport -Raw
+            Write-Output "Real-project Piano Roll regression: $($realProjectResult.Trim())"
+            if($realProjectResult.Trim() -ne 'PASS') { throw 'Real-project Piano Roll regression failed.' }
+        }
     } finally {
         foreach($name in $aiEnvVars) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name]) }
     }

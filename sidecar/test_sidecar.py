@@ -107,7 +107,7 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual(process.returncode, 0, process.stderr)
         return [json.loads(line) for line in process.stdout.splitlines()]
 
-    def test_initialize_and_exactly_five_tools(self):
+    def test_initialize_and_seven_pattern_tools(self):
         replies = self.exchange([
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
                 "protocolVersion": "2025-11-25", "capabilities": {},
@@ -120,7 +120,29 @@ class SidecarTests(unittest.TestCase):
         self.assertEqual({t["name"] for t in replies[1]["result"]["tools"]}, {
             "get_pattern_context", "replace_pattern_segment", "handoff_for_review",
             "abort_session", "release_occupancy",
+            "get_pattern_order", "switch_pattern",
         })
+
+    def test_switch_token_pins_document_until_failed_auto_apply_finishes_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target_file = Path(directory) / "target.json"
+            pending = {"ok": False, "status": "pending_review", "error": {
+                "layer": "capability", "code": "emptyProposal", "reason": "No changes"}}
+            first = {"version": 1, "pipe": r"\\.\pipe\first", "instance": "i1", "document": "d1", "generation": "g1"}
+            target_file.write_text(json.dumps(first), encoding="utf-8")
+            sidecar = Sidecar(target_file=target_file)
+            self.assertIsNone(sidecar.refresh_target("switch_pattern"))
+            sidecar.update_session_state("switch_pattern", {"ok": True, "status": "switched", "session": "switch-token"})
+            second = dict(first, document="d2", generation="g2")
+            target_file.write_text(json.dumps(second), encoding="utf-8")
+            blocked = sidecar.refresh_target("get_pattern_order")
+            self.assertIsNotNone(blocked, "Successful switch must retain the document connection")
+            self.assertEqual(blocked["error"]["code"], "busy")
+            self.assertEqual(sidecar.document, "d1")
+            self.assertIsNone(sidecar.refresh_target("handoff_for_review"))
+            sidecar.update_session_state("handoff_for_review", pending)
+            self.assertIsNone(sidecar.refresh_target("get_pattern_order"))
+            self.assertEqual(sidecar.document, "d2")
 
     def test_tools_require_explicit_attachment(self):
         result = self.exchange([call()])[0]["result"]
@@ -253,10 +275,10 @@ class SidecarTests(unittest.TestCase):
                                  ["schemaFailure", "schemaFailure"])
 
     @unittest.skipUnless(os.name == "nt", "Windows pipe transport")
-    def test_all_five_calls_translate_without_rewriting_arguments(self):
+    def test_all_seven_calls_translate_without_rewriting_arguments(self):
         arguments = {"session": "opaque", "cells": [{"row": 17, "cell": {"note": 61}}]}
         names = ["get_pattern_context", "replace_pattern_segment", "handoff_for_review",
-                 "abort_session", "release_occupancy"]
+                 "abort_session", "release_occupancy", "get_pattern_order", "switch_pattern"]
         replies = [{"ok": True}] + [{"ok": True, "echo": name} for name in names]
         with EndpointDouble(replies) as endpoint:
             results = self.exchange([call(name, arguments) for name in names],

@@ -1,0 +1,6 @@
+test_switch_wait_rejection_release_and_document_close (sidecar.test_native_integration.NativeIntegrationTests.test_switch_wait_rejection_release_and_document_close) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 8.844s
+
+OK

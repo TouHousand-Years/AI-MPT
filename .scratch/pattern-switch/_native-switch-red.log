@@ -1,0 +1,16 @@
+test_manual_switch_and_enable_automatic_acceptance (sidecar.test_native_integration.NativeIntegrationTests.test_manual_switch_and_enable_automatic_acceptance) ... FAIL
+
+======================================================================
+FAIL: test_manual_switch_and_enable_automatic_acceptance (sidecar.test_native_integration.NativeIntegrationTests.test_manual_switch_and_enable_automatic_acceptance)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_native_integration.py", line 68, in test_manual_switch_and_enable_automatic_acceptance
+    self.control(app, "Always allow Pattern switching")
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_native_integration.py", line 49, in control
+    self.assertTrue(found, f"Missing native control: {caption}")
+AssertionError: [] is not true : Missing native control: Always allow Pattern switching
+
+----------------------------------------------------------------------
+Ran 1 test in 2.077s
+
+FAILED (failures=1)

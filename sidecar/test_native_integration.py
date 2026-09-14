@@ -7,6 +7,9 @@ import sys
 import tempfile
 import time
 import unittest
+import ctypes
+from ctypes import wintypes
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import probe
@@ -20,6 +23,217 @@ EXE = Path(os.environ.get(
 
 @unittest.skipUnless(os.environ.get("OPENMPT_RUN_NATIVE_INTEGRATION") == "1", "Opt-in native executable integration")
 class NativeIntegrationTests(unittest.TestCase):
+    def control(self, app, caption, class_name=False):
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+        user.EnumChildWindows.argtypes = [wintypes.HWND, callback_type, wintypes.LPARAM]
+        found = []
+        @callback_type
+        def child(hwnd, _):
+            text = ctypes.create_unicode_buffer(256)
+            (user.GetClassNameW if class_name else user.GetWindowTextW)(hwnd, text, 256)
+            if text.value == caption:
+                found.append(hwnd)
+            return True
+        @callback_type
+        def top(hwnd, _):
+            pid = wintypes.DWORD()
+            user.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == app.pid:
+                user.EnumChildWindows(hwnd, child, 0)
+            return True
+        user.EnumWindows(top, 0)
+        self.assertTrue(found, f"Missing native control: {caption}")
+        return found[0]
+
+    def activate_page(self, app, page):
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.GetParent.argtypes = [wintypes.HWND]
+        user.GetParent.restype = wintypes.HWND
+        user.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+        user.GetAncestor.restype = wintypes.HWND
+        user.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        tab = self.control(app, "SysTabControl32", class_name=True)
+        user.SetForegroundWindow(user.GetAncestor(tab, 2))
+        # WM_MOD_ACTIVATEVIEW; -1 restores the page without selecting an Order.
+        user.SendMessageW(user.GetParent(tab), 1024 + 1975, page, -1)
+        time.sleep(0.3)
+
+    def click_control(self, app, caption):
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user.SendMessageW.restype = wintypes.LPARAM
+        user.SendMessageW(self.control(app, caption), 0x00F5, 0, 0)  # BM_CLICK
+
+    def checked_control(self, app, caption):
+        user = ctypes.WinDLL("user32", use_last_error=True)
+        user.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user.SendMessageW.restype = wintypes.LPARAM
+        return bool(user.SendMessageW(self.control(app, caption), 0x00F0, 0, 0))
+
+    def test_manual_switch_and_enable_automatic_acceptance(self):
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-switch-") as directory:
+            report, stop = Path(directory) / "endpoint.json", Path(directory) / "stop"
+            app, _, endpoint = self.start_app(report, stop, 0)
+            client = probe.PipeClient(endpoint["pipe"])
+            preferences = {}
+            try:
+                client.connect()
+                client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))
+                def invoke(tool, arguments):
+                    return client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "call", tool=tool, arguments=arguments))
+                for caption in ("Always allow Pattern switching", "Always accept submissions"):
+                    preferences[caption] = self.checked_control(app, caption)
+                    if preferences[caption]:
+                        self.click_control(app, caption)
+                self.activate_page(app, 49001)  # AI::PanelPageId
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(invoke, "switch_pattern", {"pattern": 1})
+                    time.sleep(0.4)
+                    self.assertFalse(future.done(), "Manual switch must wait for the human")
+                    self.click_control(app, "Approve Pattern switch")
+                    switched = future.result(timeout=5)
+                self.assertTrue(switched["ok"], switched)
+                self.assertEqual(switched["source"]["pattern"], 0)
+                self.assertEqual(switched["context"]["pattern"], 1)
+                token = switched["session"]
+                segment = {"session": token, "channel": 2, "first_row": 0, "row_count": 1,
+                           "cells": [{"row": 0, "cell": {"note": 60, "instrument": 2, "volume_command": 1,
+                                                        "volume": 40, "effect_command": 0, "effect_parameter": 0}}]}
+                self.assertTrue(invoke("replace_pattern_segment", segment)["ok"])
+                self.assertEqual(invoke("handoff_for_review", {"session": token})["status"], "pending_review")
+                self.click_control(app, "Always accept submissions")
+                self.activate_page(app, 116)  # IDD_CONTROL_PATTERNS
+                read = invoke("get_pattern_context", {})
+                self.assertTrue(read["ok"], read)
+                self.assertEqual(read["context"]["pattern"], 1)
+                self.assertTrue(any(c["row"] == 0 and c["channel"] == 2 and c["raw"]["note"] == 60 for c in read["context"]["cells"]))
+                self.click_control(app, "Always accept submissions")
+            finally:
+                client.close()
+                for caption, checked in preferences.items():
+                    if self.checked_control(app, caption) != checked:
+                        self.click_control(app, caption)
+                self.stop_app(app, stop)
+
+    def test_order_read_before_session_and_from_another_connection(self):
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-order-") as directory:
+            report, stop = Path(directory) / "endpoint.json", Path(directory) / "stop"
+            app, _, endpoint = self.start_app(report, stop, 0)
+            clients = [probe.PipeClient(endpoint["pipe"]) for _ in range(2)]
+            try:
+                for client in clients:
+                    client.connect()
+                    self.assertTrue(client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))["ok"])
+                def invoke(client, tool, arguments):
+                    return client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "call", tool=tool, arguments=arguments))
+                order = invoke(clients[0], "get_pattern_order", {})
+                self.assertTrue(order["ok"], order)
+                self.assertEqual(order["entries"][0]["pattern"], 0)
+                retained = invoke(clients[0], "get_pattern_context", {"occupy": True})
+                self.assertTrue(retained["ok"], retained)
+                other = invoke(clients[1], "get_pattern_order", {})
+                self.assertTrue(other["ok"], other)
+                self.assertTrue(invoke(clients[0], "release_occupancy", {"session": retained["session"]})["ok"])
+            finally:
+                for client in clients:
+                    client.close()
+                self.stop_app(app, stop)
+
+    def test_switch_wait_rejection_release_and_document_close(self):
+        for action in ("reject", "release", "close"):
+            with self.subTest(action=action), tempfile.TemporaryDirectory(prefix="openmpt-ai-wait-") as directory:
+                report, stop = Path(directory) / "endpoint.json", Path(directory) / "stop"
+                app, _, endpoint = self.start_app(report, stop, 0)
+                owner, observer = probe.PipeClient(endpoint["pipe"]), probe.PipeClient(endpoint["pipe"])
+                preference = None
+                pool = ThreadPoolExecutor(max_workers=1)
+                try:
+                    preference = self.checked_control(app, "Always allow Pattern switching")
+                    if preference:
+                        self.click_control(app, "Always allow Pattern switching")
+                    for client in (owner, observer):
+                        client.connect()
+                        client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))
+                    def invoke(client, tool, args, **extra):
+                        return client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "call", tool=tool, arguments=args, **extra))
+                    retained = invoke(owner, "get_pattern_context", {"occupy": True})
+                    self.assertTrue(retained["ok"], retained)
+                    token = retained["session"]
+                    future = pool.submit(invoke, owner, "switch_pattern", {"pattern": 1, "session": token})
+                    time.sleep(0.4)
+                    self.assertFalse(future.done())
+                    blocked = invoke(observer, "switch_pattern", {"pattern": 1, "session": token})
+                    self.assertEqual(blocked["error"]["code"], "busy")
+                    if action == "reject":
+                        self.click_control(app, "Reject Pattern switch")
+                        self.assertEqual(future.result(timeout=5)["error"]["code"], "patternSwitchRejected")
+                        read = invoke(owner, "get_pattern_context", {"session": token})
+                        self.assertEqual(read["context"]["pattern"], 0)
+                        invoke(owner, "abort_session", {"session": token})
+                    elif action == "release":
+                        self.click_control(app, "RELEASE AI NOW")
+                        self.assertEqual(future.result(timeout=5)["error"]["code"], "occupancyLost")
+                        self.assertTrue(invoke(observer, "get_pattern_context", {})["ok"])
+                    elif action == "close":
+                        result = invoke(observer, "get_pattern_order", {}, test_close_before_dispatch=True)
+                        self.assertEqual(result["error"]["code"], "documentGone")
+                        self.assertEqual(future.result(timeout=5)["error"]["code"], "documentGone")
+                finally:
+                    observer.close()
+                    if preference is not None and self.checked_control(app, "Always allow Pattern switching") != preference:
+                        self.click_control(app, "Always allow Pattern switching")
+                    self.stop_app(app, stop)
+                    pool.shutdown(wait=True)
+                    owner.close()
+
+    def test_disconnected_switch_request_releases_reservation(self):
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-disconnect-") as directory:
+            report, stop = Path(directory) / "endpoint.json", Path(directory) / "stop"
+            app, _, endpoint = self.start_app(report, stop, 0)
+            child = None
+            observer = probe.PipeClient(endpoint["pipe"])
+            preference = None
+            try:
+                preference = self.checked_control(app, "Always allow Pattern switching")
+                if preference:
+                    self.click_control(app, "Always allow Pattern switching")
+                child = subprocess.Popen([sys.executable, "-c",
+                    "import json,sys; from openmpt_mcp import Sidecar; e=json.loads(sys.argv[1]); "
+                    "s=Sidecar(e['pipe'],e['instance'],e['document']); "
+                    "s.call('switch_pattern',{'pattern':1})", json.dumps(endpoint)],
+                    cwd=ROOT / "sidecar", stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                time.sleep(0.5)
+                self.assertIsNone(child.poll(), "Switch must be waiting when client exits")
+                observer.connect()
+                observer.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))
+                def read():
+                    return observer.transact(probe.envelope(endpoint["instance"], endpoint["document"], "call", tool="get_pattern_context", arguments={}))
+                self.assertEqual(read()["error"]["code"], "busy")
+                child.kill()
+                child.wait(timeout=5)
+                result = read()
+                deadline = time.monotonic() + 5
+                while not result["ok"] and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                    result = read()
+                self.assertTrue(result["ok"], result)
+            finally:
+                if child:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+                    child.stderr.close()
+                observer.close()
+                if preference is not None and self.checked_control(app, "Always allow Pattern switching") != preference:
+                    self.click_control(app, "Always allow Pattern switching")
+                self.stop_app(app, stop)
+
     def start_app(self, report, stop, pattern):
         env = dict(os.environ, OPENMPT_AI_TEST_FIXTURE=str(ROOT / "test-fixtures/ai-collab-fixture.mptm"),
                    OPENMPT_AI_ENDPOINT_REPORT=str(report), OPENMPT_AI_STOP_FILE=str(stop),
@@ -172,7 +386,7 @@ class NativeIntegrationTests(unittest.TestCase):
                                            "clientInfo": {"name": "native-boundary-test", "version": "1"}})
                     sidecar.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
                     sidecar.stdin.flush()
-                    self.assertEqual(len(request("tools/list")["tools"]), 5)
+                    self.assertEqual(len(request("tools/list")["tools"]), 7)
                     baseline = call("get_pattern_context", {"occupy": True})
                     self.assertTrue(baseline["ok"], baseline)
                     self.assertEqual(baseline["context"]["pattern"], pattern)

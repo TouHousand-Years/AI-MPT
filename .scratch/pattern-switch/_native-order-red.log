@@ -1,0 +1,14 @@
+test_order_read_before_session_and_from_another_connection (sidecar.test_native_integration.NativeIntegrationTests.test_order_read_before_session_and_from_another_connection) ... FAIL
+
+======================================================================
+FAIL: test_order_read_before_session_and_from_another_connection (sidecar.test_native_integration.NativeIntegrationTests.test_order_read_before_session_and_from_another_connection)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_native_integration.py", line 35, in test_order_read_before_session_and_from_another_connection
+    self.assertTrue(order["ok"], order)
+AssertionError: False is not true : {'error': {'code': 'occupancyLost', 'layer': 'capability', 'reason': 'Start with an occupied context read'}, 'ok': False}
+
+----------------------------------------------------------------------
+Ran 1 test in 2.552s
+
+FAILED (failures=1)

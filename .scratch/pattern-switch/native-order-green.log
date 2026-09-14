@@ -1,0 +1,6 @@
+test_order_read_before_session_and_from_another_connection (sidecar.test_native_integration.NativeIntegrationTests.test_order_read_before_session_and_from_another_connection) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.773s
+
+OK

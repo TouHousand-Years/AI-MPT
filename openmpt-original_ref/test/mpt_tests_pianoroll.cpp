@@ -212,6 +212,79 @@ void PianoRollPatternTests(const CString &fixture)
 	document->OnCloseDocument();
 }
 
+void PianoRollRealProjectTests(const CString &fixture)
+{
+	auto *document = static_cast<CModDoc *>(theApp.OpenDocumentFile(fixture, FALSE));
+	if(document == nullptr)
+		throw std::runtime_error("Cannot load Piano Roll real-project fixture");
+
+	PianoRollPattern editor(*document);
+	const auto &sndFile = document->GetSoundFile();
+	std::vector<std::tuple<PATTERNINDEX, ROWINDEX, CHANNELINDEX, ModCommand>> trackerOnlyNotes;
+	for(PATTERNINDEX pattern = 0; pattern < sndFile.Patterns.Size(); ++pattern)
+	{
+		if(!sndFile.Patterns.IsValidPat(pattern)) continue;
+		for(CHANNELINDEX channel = 0; channel < sndFile.GetNumChannels(); ++channel)
+			for(ROWINDEX row = 0; row < sndFile.Patterns[pattern].GetNumRows(); ++row)
+			{
+				const ModCommand cell = *sndFile.Patterns[pattern].GetpModCommand(row, channel);
+				// A leading key-off cannot be a duration marker for a projected
+				// note in this Pattern and must stay in its Tracker channel.
+				if(cell.note >= NOTE_MIN_SPECIAL && (cell.note != NOTE_KEYOFF || row == 0))
+					trackerOnlyNotes.emplace_back(pattern, row, channel, cell);
+			}
+	}
+	Require(!trackerOnlyNotes.empty(), "The real-project regression fixture contains Tracker-only special notes");
+	std::optional<PianoRollPattern::Note> editableNote;
+	PianoRollPattern::Projection projection;
+	for(PATTERNINDEX pattern = 0; pattern < sndFile.Patterns.Size() && !editableNote; ++pattern)
+	{
+		if(!sndFile.Patterns.IsValidPat(pattern)) continue;
+		projection = editor.Read(pattern);
+		Require(projection.editable, "A loaded real-project Pattern is editable in the Piano Roll");
+		for(const auto &note : projection.notes)
+		{
+			if(note.pitch > projection.noteMin || note.pitch < projection.noteMax)
+			{
+				editableNote = note;
+				break;
+			}
+		}
+	}
+	Require(editableNote.has_value(), "The real project exposes a pitched Piano Roll note");
+
+	PianoRollPattern::Operation transpose;
+	transpose.type = PianoRollPattern::OperationType::Transpose;
+	transpose.pattern = editableNote->id.pattern;
+	transpose.notes = {editableNote->id};
+	transpose.pitchDelta = editableNote->pitch < projection.noteMax ? 1 : -1;
+	const auto result = editor.Apply(transpose);
+	if(!result.applied)
+		throw std::runtime_error("A real-project Piano Roll note edit failed: " + mpt::ToCharset(mpt::Charset::UTF8, result.reason));
+	Require(result.affected.size() == 1, "A single real-project note edit affects one Piano Roll note");
+	const auto changed = editor.Read(result.affected.front().pattern);
+	const auto changedNote = std::find_if(changed.notes.begin(), changed.notes.end(), [&](const auto &note)
+	{
+		return note.id == result.affected.front();
+	});
+	Require(changedNote != changed.notes.end() && changedNote->pitch == editableNote->pitch + transpose.pitchDelta,
+		"The requested real-project pitch edit is visible in the Piano Roll projection");
+	for(const auto &[pattern, row, channel, before] : trackerOnlyNotes)
+		Require(*sndFile.Patterns[pattern].GetpModCommand(row, channel) == before,
+			"Piano Roll editing preserves Tracker-only special notes in place");
+	UndoOne(*document, "The real-project Piano Roll edit remains one atomic Undo step");
+	const auto restored = editor.Read(editableNote->id.pattern);
+	const auto restoredNote = std::find_if(restored.notes.begin(), restored.notes.end(), [&](const auto &note)
+	{
+		return note.id == editableNote->id;
+	});
+	Require(restoredNote != restored.notes.end() && restoredNote->pitch == editableNote->pitch,
+		"Undo restores the real-project Piano Roll note");
+
+	document->SetModified(false);
+	document->OnCloseDocument();
+}
+
 }  // namespace Test
 
 OPENMPT_NAMESPACE_END

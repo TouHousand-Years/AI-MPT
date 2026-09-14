@@ -1,0 +1,39 @@
+test_all_five_calls_translate_without_rewriting_arguments (test_sidecar.SidecarTests.test_all_five_calls_translate_without_rewriting_arguments) ... ok
+test_auto_target_uses_current_user_local_app_data (test_sidecar.SidecarTests.test_auto_target_uses_current_user_local_app_data) ... ok
+test_disconnect_is_not_replayed (test_sidecar.SidecarTests.test_disconnect_is_not_replayed) ... ok
+test_failed_attachment_never_calls_or_retargets (test_sidecar.SidecarTests.test_failed_attachment_never_calls_or_retargets) ... ok
+test_initialize_and_seven_pattern_tools (test_sidecar.SidecarTests.test_initialize_and_seven_pattern_tools) ... FAIL
+test_malformed_app_failures_close_connection (test_sidecar.SidecarTests.test_malformed_app_failures_close_connection) ... ok
+test_published_target_attaches_without_cli_identities (test_sidecar.SidecarTests.test_published_target_attaches_without_cli_identities) ... ok
+test_remote_pipe_is_rejected (test_sidecar.SidecarTests.test_remote_pipe_is_rejected) ... ok
+test_republishing_same_document_clears_latched_attachment_error (test_sidecar.SidecarTests.test_republishing_same_document_clears_latched_attachment_error) ... ok
+test_switch_token_pins_document_until_failed_auto_apply_finishes_session (test_sidecar.SidecarTests.test_switch_token_pins_document_until_failed_auto_apply_finishes_session) ... FAIL
+test_target_file_requires_an_openmpt_publication (test_sidecar.SidecarTests.test_target_file_requires_an_openmpt_publication) ... ok
+test_target_switch_waits_for_retained_work_to_end (test_sidecar.SidecarTests.test_target_switch_waits_for_retained_work_to_end) ... ok
+test_tools_require_explicit_attachment (test_sidecar.SidecarTests.test_tools_require_explicit_attachment) ... ok
+test_typed_application_failures_preserved (test_sidecar.SidecarTests.test_typed_application_failures_preserved) ... ok
+test_unknown_tool_and_malformed_request (test_sidecar.SidecarTests.test_unknown_tool_and_malformed_request) ... ok
+test_unpaired_surrogate_does_not_crash_process (test_sidecar.SidecarTests.test_unpaired_surrogate_does_not_crash_process) ... ok
+
+======================================================================
+FAIL: test_initialize_and_seven_pattern_tools (test_sidecar.SidecarTests.test_initialize_and_seven_pattern_tools)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_sidecar.py", line 120, in test_initialize_and_seven_pattern_tools
+    self.assertEqual({t["name"] for t in replies[1]["result"]["tools"]}, {
+AssertionError: Items in the second set but not the first:
+'get_pattern_order'
+'switch_pattern'
+
+======================================================================
+FAIL: test_switch_token_pins_document_until_failed_auto_apply_finishes_session (test_sidecar.SidecarTests.test_switch_token_pins_document_until_failed_auto_apply_finishes_session)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "E:\My AI-s Memory\Code\OpenMPT-for-AI\sidecar\test_sidecar.py", line 139, in test_switch_token_pins_document_until_failed_auto_apply_finishes_session
+    self.assertIsNotNone(blocked, "Successful switch must retain the document connection")
+AssertionError: unexpectedly None : Successful switch must retain the document connection
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.789s
+
+FAILED (failures=2)

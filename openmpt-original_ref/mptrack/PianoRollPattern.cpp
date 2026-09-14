@@ -399,18 +399,6 @@ EditResult ApplyRepacked(CModDoc &document, const Operation &operation)
 		}
 	}
 
-	size_t requiredChannels = 0;
-	for(const auto &[instrument, count] : layerCounts) requiredChannels += count;
-	const CHANNELINDEX workingChannels = static_cast<CHANNELINDEX>(std::max<size_t>(requiredChannels, originalChannels));
-	if(workingChannels > specs.channelsMax) return Failure(_T("The instrument groups need more channels than this module format permits."), originalChannels);
-	std::map<ModCommand::INSTR, CHANNELINDEX> groupStarts;
-	CHANNELINDEX nextChannel = 0;
-	for(const auto &[instrument, count] : layerCounts)
-	{
-		groupStarts[instrument] = nextChannel;
-		nextChannel = static_cast<CHANNELINDEX>(nextChannel + count);
-	}
-
 	std::map<CellKey, CellChange> changes;
 	auto originalCell = [&](PATTERNINDEX pat, ROWINDEX row, CHANNELINDEX channel) -> ModCommand
 	{
@@ -439,11 +427,71 @@ EditResult ApplyRepacked(CModDoc &document, const Operation &operation)
 				else if(managedStops.count({pat, row, channel})) mutableCell(pat, row, channel).note = NOTE_NONE;
 			}
 	}
+
+	// Assign each logical instrument layer to the lowest physical channel on
+	// which its note starts and durations do not collide with Tracker-only
+	// events. Real modules commonly keep PC notes, note cuts or delayed cuts in
+	// otherwise musical channels; blindly packing groups from channel zero made
+	// any unrelated collision reject the whole Piano Roll edit.
+	using LayerKey = std::pair<ModCommand::INSTR, size_t>;
+	std::map<LayerKey, CHANNELINDEX> layerChannels;
+	std::set<CHANNELINDEX> assignedChannels;
+	auto plannedCell = [&](PATTERNINDEX pat, ROWINDEX row, CHANNELINDEX channel) -> ModCommand
+	{
+		const auto changed = changes.find({pat, row, channel});
+		return changed != changes.end() ? changed->second.after : originalCell(pat, row, channel);
+	};
+	for(const auto &[instrument, count] : layerCounts)
+	{
+		for(size_t layer = 0; layer < count; ++layer)
+		{
+			CHANNELINDEX assigned = CHANNELINDEX_INVALID;
+			for(CHANNELINDEX candidate = 0; candidate < specs.channelsMax; ++candidate)
+			{
+				if(assignedChannels.count(candidate)) continue;
+				bool compatible = true;
+				for(NoteBlock *block : groups[instrument])
+				{
+					if(layers[block] != layer) continue;
+					const ModCommand start = plannedCell(block->pattern, block->start, candidate);
+					if(start.note >= NOTE_MIN_SPECIAL || start.instr != 0 || start.volcmd == VOLCMD_VOLUME)
+					{
+						compatible = false;
+						break;
+					}
+					for(ROWINDEX row = block->start + 1; row < block->end; ++row)
+					{
+						if(IsTermination(plannedCell(block->pattern, row, candidate)))
+						{
+							compatible = false;
+							break;
+						}
+					}
+					if(!compatible) break;
+				}
+				if(compatible)
+				{
+					assigned = candidate;
+					break;
+				}
+			}
+			if(assigned == CHANNELINDEX_INVALID)
+				return Failure(_T("The instrument groups need more conflict-free channels than this module format permits."), originalChannels);
+			layerChannels[{instrument, layer}] = assigned;
+			assignedChannels.insert(assigned);
+		}
+	}
+	CHANNELINDEX workingChannels = originalChannels;
+	for(const auto &[layer, channel] : layerChannels)
+		workingChannels = std::max(workingChannels, static_cast<CHANNELINDEX>(channel + 1));
+	if(workingChannels > specs.channelsMax)
+		return Failure(_T("The instrument groups need more channels than this module format permits."), originalChannels);
+
 	std::set<CellKey> starts;
 	std::vector<NoteRef> affected;
 	for(NoteBlock &block : blocks)
 	{
-		const CHANNELINDEX channel = static_cast<CHANNELINDEX>(groupStarts[block.instrument] + layers[&block]);
+		const CHANNELINDEX channel = layerChannels[{block.instrument, layers[&block]}];
 		ModCommand &cell = mutableCell(block.pattern, block.start, channel);
 		if(cell.note >= NOTE_MIN_SPECIAL || cell.instr != 0 || cell.volcmd == VOLCMD_VOLUME)
 			return Failure(_T("A Piano Roll note conflicts with Tracker-only data while splitting channels."), originalChannels);
@@ -460,7 +508,7 @@ EditResult ApplyRepacked(CModDoc &document, const Operation &operation)
 	for(NoteBlock &block : blocks)
 	{
 		if(block.end >= sndFile.Patterns[block.pattern].GetNumRows()) continue;
-		const CHANNELINDEX channel = static_cast<CHANNELINDEX>(groupStarts[block.instrument] + layers[&block]);
+		const CHANNELINDEX channel = layerChannels[{block.instrument, layers[&block]}];
 		if(starts.count({block.pattern, block.end, channel})) continue;
 		ModCommand &cell = mutableCell(block.pattern, block.end, channel);
 		if(cell.note == NOTE_NONE) cell.note = NOTE_KEYOFF;
@@ -468,7 +516,9 @@ EditResult ApplyRepacked(CModDoc &document, const Operation &operation)
 
 	// Keep channels that still contain Tracker-only data, but discard empty
 	// trailing layers created by earlier Piano Roll overlap operations.
-	size_t usedChannels = requiredChannels;
+	size_t usedChannels = 0;
+	for(const CHANNELINDEX channel : assignedChannels)
+		usedChannels = std::max(usedChannels, static_cast<size_t>(channel + 1));
 	for(CHANNELINDEX channel = 0; channel < workingChannels; ++channel)
 	{
 		bool used = false;

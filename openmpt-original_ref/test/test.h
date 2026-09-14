@@ -25,6 +25,7 @@ void DoTests();
 #ifdef MODPLUG_TRACKER
 void AIPatternTests(const CString &fixture);
 void PianoRollPatternTests(const CString &fixture);
+void PianoRollRealProjectTests(const CString &fixture);
 #endif
 
 } // namespace Test

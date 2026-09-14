@@ -1,0 +1,20 @@
+适用于 .NET Framework MSBuild 版本 17.14.51+25f168cee
+
+  ancient.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-ancient.lib
+  lhasa.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-lhasa.lib
+  ogg.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-ogg.lib
+  rtaudio.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-rtaudio.lib
+  zlib.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-zlib.lib
+  lame.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\openmpt-lame.dll
+  rtmidi.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-rtmidi.lib
+  portaudio.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-portaudio.lib
+  mpg123.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\openmpt-mpg123.dll
+  UnRAR.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-unrar.lib
+  minizip.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-minizip.lib
+  vorbis.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-vorbis.lib
+  opus.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opus.lib
+  flac.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-flac.lib
+  opusfile.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opusfile.lib
+  opusenc.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\build\lib\vs2022win10\x86_64\Debug\openmpt-opusenc.lib
+  AIService.cpp
+  OpenMPT.vcxproj -> E:\My AI-s Memory\Code\OpenMPT-for-AI\openmpt-original_ref\bin\debug\vs2022-win10-static\amd64\OpenMPT.exe

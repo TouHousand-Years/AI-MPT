@@ -8,10 +8,12 @@
 #include "Mptrack.h"
 #include "Mainfrm.h"
 #include "View_pat.h"
+#include "Childfrm.h"
 #include "UpdateHints.h"
 #include "Globals.h"
 #include "WindowMessages.h"
 #include <sddl.h>
+#include <algorithm>
 #include <atomic>
 #include <thread>
 #include <mutex>
@@ -215,7 +217,15 @@ class Broker
 					std::unique_lock lock(request->mutex);
 					IpcThreadScope ipc;
 					while(!request->done && WaitForSingleObject(m_stop, 0) != WAIT_OBJECT_0)
+					{
 						request->ready.wait_for(lock, std::chrono::milliseconds(100));
+						if(request->done) break;
+						// A request may wait indefinitely for human approval; notice a
+						// vanished client promptly instead of only when the eventual
+						// reply is written, so its reservation can be released in time.
+						DWORD available = 0;
+						if(PeekNamedPipe(pipe, nullptr, 0, nullptr, &available, nullptr) == FALSE) break;
+					}
 					if(!request->done) break;
 					result = request->response;
 					if(attach && result.value("ok", false))
@@ -336,7 +346,63 @@ CViewPattern *PatternView(CModDoc &doc)
 	return nullptr;
 }
 
-enum Control : UINT { Enable = 1, AlwaysApprove, Timeout, Apply, Reject, Release, Approve, Decline, Publish, Evidence, SettingsSave };
+// Approved Pattern switches must be visible on the Patterns page without
+// touching the Sequence, the Order selection or playback. The dedicated AI
+// page replaces the lower Patterns view, so when no live CViewPattern exists the
+// per-document saved state is updated instead: that is what the next Patterns
+// activation restores through the dedicated switchRestore path in
+// CCtrlPatterns::OnActivatePage. SetCurrentPattern() already clamps the cursor
+// row and collapses any previous selection onto the cursor.
+void SynchronizePatternDisplay(CModDoc &doc, PATTERNINDEX pattern)
+{
+	const auto &sf = doc.GetSoundFile();
+	if(!sf.Patterns.IsValidPat(pattern)) return;
+	if(auto *view = PatternView(doc))
+	{
+		view->SetCurrentPattern(pattern);
+		view->InvalidatePattern();
+		return;
+	}
+	POSITION pos = doc.GetFirstViewPosition();
+	while(pos)
+	{
+		auto *view = doc.GetNextView(pos);
+		auto *frame = view ? dynamic_cast<CChildFrame *>(view->GetParentFrame()) : nullptr;
+		if(!frame) continue;
+		auto &state = frame->GetPatternViewState();
+		state.nPattern = pattern;
+		// A freshly created Patterns view always starts at Pattern 0 and asks the
+		// Order selection for its Pattern, so the saved state alone is not enough.
+		// Mark a dedicated one-shot restore that outranks that initialization.
+		state.switchRestore = pattern;
+		state.cursor.Sanitize(sf.Patterns[pattern].GetNumRows(), sf.GetNumChannels());
+		state.selection = PatternRect(state.cursor, state.cursor);
+		state.initialized = true;
+		break;
+	}
+}
+
+// The saved display state is the only Pattern the view-less AI page can name:
+// a session-less Pattern switch must report it as its source instead of an
+// unbound facade. This is a read-only lookup.
+PATTERNINDEX SavedPatternDisplay(CModDoc &doc)
+{
+	const auto &patterns = doc.GetSoundFile().Patterns;
+	POSITION pos = doc.GetFirstViewPosition();
+	while(pos)
+	{
+		auto *view = doc.GetNextView(pos);
+		auto *frame = view ? dynamic_cast<CChildFrame *>(view->GetParentFrame()) : nullptr;
+		if(!frame) continue;
+		const auto &state = frame->GetPatternViewState();
+		if(state.switchRestore != PATTERNINDEX_INVALID && patterns.IsValidPat(state.switchRestore)) return state.switchRestore;
+		if(state.initialized && patterns.IsValidPat(state.nPattern)) return state.nPattern;
+		break;
+	}
+	return PATTERNINDEX_INVALID;
+}
+
+enum Control : UINT { Enable = 1, AlwaysApprove, AlwaysSwitch, AlwaysAccept, Timeout, Apply, Reject, Release, Approve, Decline, Publish, Evidence, SettingsSave };
 
 class Panel;
 class ReviewPanel;
@@ -381,13 +447,17 @@ public:
 	ThreadProbe threadProbe;
 	CModDoc *document = nullptr;
 	std::shared_ptr<Request> pending;
-	CButton enable, always;
+	CButton enable, always, alwaysSwitch, alwaysAccept;
 	CEdit timeout, identity;
 	std::vector<std::unique_ptr<CButton>> buttons;
 	std::string instance;
 	// The connection that owns retained (potentially mutating) capability state.
-	// Plain attachments and one-shot reads never claim this slot.
+	// Plain attachments and one-shot reads never claim this slot like a switch
+	// reservation does, so it is also set while a switch waits for approval.
 	uint64 capabilityConnection = 0;
+	// Connection ids whose disconnect notice already arrived. A request from such
+	// a connection must never create a new reservation or session.
+	std::deque<uint64> disconnected;
 	std::wstring pipe;
 	Json review;
 	CString identityText;
@@ -432,10 +502,16 @@ public:
 			_T("AI / MCP - Pattern collaboration"), WS_CHILD, CRect(0, 0, 1040, 692), &owner, 0);
 		enable.Create(_T("Enable MCP"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(12, 12, 150, 38), this, Enable);
 		always.Create(_T("Always approve range expansion"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(160, 12, 460, 38), this, AlwaysApprove);
+		alwaysSwitch.Create(_T("Always allow Pattern switching"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(12, 44, 330, 70), this, AlwaysSwitch);
+		alwaysAccept.Create(_T("Always accept submissions"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, CRect(340, 44, 640, 70), this, AlwaysAccept);
 		timeout.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_NUMBER, CRect(470, 12, 530, 38), this, Timeout);
 		seconds = std::clamp(theApp.GetSettings().Read<unsigned>(U_("AI/MCP"), U_("TimeoutSeconds"), 300), 1u, 3600u);
 		CString value; value.Format(_T("%u"), seconds); timeout.SetWindowText(value);
 		always.SetCheck(theApp.GetSettings().Read<bool>(U_("AI/MCP"), U_("AlwaysApprove"), false));
+		// Pattern-switch and automatic-submission preferences persist independently
+		// of the range-expansion preference and default to off.
+		alwaysSwitch.SetCheck(theApp.GetSettings().Read<bool>(U_("AI/MCP"), U_("AlwaysSwitch"), false));
+		alwaysAccept.SetCheck(theApp.GetSettings().Read<bool>(U_("AI/MCP"), U_("AlwaysAccept"), false));
 		enable.SetCheck(theApp.GetSettings().Read<bool>(U_("AI/MCP"), U_("Enabled"), true));
 		auto button = [&](UINT id, LPCTSTR text, CRect rect)
 		{
@@ -480,28 +556,50 @@ public:
 		}
 	}
 	// Issue 36: the upper row only holds the MCP connection and configuration
-	// controls; the review controls live in the dedicated lower view. The identity
-	// list takes all remaining vertical space.
+	// controls; the review controls live in the dedicated lower view. Controls
+	// wrap onto as many rows as the current width needs instead of being squeezed
+	// into unreadable fixed columns; the identity list takes the remaining space.
 	void LayoutChildren()
 	{
-		if(!GetSafeHwnd() || !enable.GetSafeHwnd() || !identity.GetSafeHwnd()) return;
+		if(!GetSafeHwnd() || !enable.GetSafeHwnd() || !identity.GetSafeHwnd() || !alwaysSwitch.GetSafeHwnd() || !alwaysAccept.GetSafeHwnd()) return;
 		CRect client;
 		GetClientRect(&client);
 		const int cx = std::max<int>(client.Width(), 320);
-		const double sx = std::clamp((cx - 24.0) / (1052.0 - 24.0), 0.4, 2.0);
-		const auto X = [sx](int x) { return static_cast<int>((x - 12) * sx + 12.5); };
 		const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
-		const int topRow = 12;
-		enable.SetWindowPos(nullptr, X(12), topRow, std::max(40, X(150) - X(12)), 26, flags);
-		always.SetWindowPos(nullptr, X(160), topRow, std::max(40, X(460) - X(160)), 26, flags);
-		timeout.SetWindowPos(nullptr, X(470), topRow, std::max(30, X(530) - X(470)), 26, flags);
-		const CRect buttonBase[]{CRect(540, 12, 750, 38), CRect(770, 12, 990, 38)};
-		for(size_t i = 0; i < buttons.size() && i < 2; i++)
-			buttons[i]->SetWindowPos(nullptr, X(buttonBase[i].left), topRow,
-				std::max(40, X(buttonBase[i].right) - X(buttonBase[i].left)), 26, flags);
-		const int identityTop = topRow + 26 + 10;
-		const int identityBottom = std::max(identityTop + 18, client.Height() - 12);
-		identityRect.SetRect(X(12), identityTop, X(1040), identityBottom);
+		const int margin = 12, gap = 8, height = 26, lineGap = 6;
+		int x = margin, y = margin;
+		const auto measure = [this](CWnd &control, LPCTSTR fallback, int minimum, int maximum)
+		{
+			CString caption;
+			control.GetWindowText(caption);
+			if(caption.IsEmpty()) caption = fallback;
+			CClientDC dc(this);
+			CFont *font = control.GetFont();
+			CFont *previous = font ? dc.SelectObject(font) : nullptr;
+			const int width = dc.GetTextExtent(caption).cx + 14;
+			if(previous) dc.SelectObject(previous);
+			return std::clamp(width, minimum, maximum);
+		};
+		const auto place = [&](CWnd &control, int preferred)
+		{
+			const int width = std::max(40, std::min(preferred, cx - 2 * margin));
+			if(x > margin && x + width > cx - margin)
+			{
+				x = margin;
+				y += height + lineGap;
+			}
+			control.SetWindowPos(nullptr, x, y, width, height, flags);
+			x += width + gap;
+		};
+		place(enable, measure(enable, _T("Enable MCP"), 90, 220));
+		place(always, measure(always, _T("Always approve range expansion"), 150, 320));
+		place(timeout, 70);
+		if(!buttons.empty()) place(*buttons[0], measure(*buttons[0], _T("Save settings (seconds)"), 120, 240));
+		place(alwaysSwitch, measure(alwaysSwitch, _T("Always allow Pattern switching"), 160, 330));
+		place(alwaysAccept, measure(alwaysAccept, _T("Always accept submissions"), 140, 310));
+		if(buttons.size() > 1) place(*buttons[1], measure(*buttons[1], _T("Connect active doc to Codex"), 130, 260));
+		y += height + 10;
+		identityRect.SetRect(margin, y, std::max(margin + 18, cx - margin), std::max(y + 18, client.Height() - margin));
 		identity.SetWindowPos(nullptr, identityRect.left, identityRect.top, identityRect.Width(), identityRect.Height(), flags);
 		Invalidate(FALSE);
 	}
@@ -523,7 +621,7 @@ public:
 			lastMessage = _T("Enable MCP and wait for the service to start before connecting Codex.");
 			return;
 		}
-		if(capability && (capability->Occupied() || capability->HasProposal()))
+		if(capability && (capability->Occupied() || capability->PendingSwitch() || capability->HasProposal()))
 		{
 			lastMessage = _T("Finish or release current AI work before publishing another target.");
 			return;
@@ -581,6 +679,11 @@ public:
 	}
 	void HandleDisconnect(const DisconnectNotice &notice)
 	{
+		// Remember the identity so a request from this connection that is still
+		// queued behind the disconnect notice can never create a reservation or
+		// session; connection ids are unique and never reused.
+		disconnected.push_back(notice.connection);
+		if(disconnected.size() > 64) disconnected.pop_front();
 		{
 			std::lock_guard lock(threadProbe.mutex);
 			if(threadProbe.connection == notice.connection)
@@ -622,10 +725,40 @@ public:
 		const std::string tool = envelope.at("tool").get<std::string>();
 		const auto &args = envelope.at("arguments");
 		if(!args.is_object()) return Failure("schemaFailure", "Arguments must be an object", "transport");
-		if(capability && (capability->Occupied() || capability->HasProposal()) && document != target) return Failure("busy", "Another document has active work");
-		if(capability && capability->Occupied() && capabilityConnection != connection)
+		// Order inspection is a session-less read: serve it through a temporary
+		// read-only capability with no bound Pattern, before the view, session and
+		// connection-ownership restrictions. An existing session and its owning
+		// connection are neither rebound nor released by this probe.
+		if(tool == "get_pattern_order")
+		{
+			PatternCapability reader(*target, PATTERNINDEX_INVALID, std::nullopt);
+			reader.Configure(seconds, always.GetCheck() == BST_CHECKED, alwaysSwitch.GetCheck() == BST_CHECKED, alwaysAccept.GetCheck() == BST_CHECKED);
+			return reader.Call(tool, args);
+		}
+		// The notice is drained before queued requests, so a dead connection can
+		// never create a reservation or an occupancy other readers could inherit.
+		if(std::find(disconnected.begin(), disconnected.end(), connection) != disconnected.end())
+			return Failure("occupancyLost", "Client disconnected before dispatch", "attachment");
+		if(capability && (capability->Occupied() || capability->PendingSwitch() || capability->HasProposal()) && document != target)
+			return Failure("busy", "Another document has active work");
+		if(capability && (capability->Occupied() || capability->PendingSwitch()) && capabilityConnection != connection)
 			return Failure("busy", "Another MCP connection owns the active session");
-		if(tool == "get_pattern_context" && !args.contains("session") && (!capability || (!capability->Occupied() && !capability->HasProposal())))
+		// A session-less switch does not need a prior context read: bind the
+		// facade to the displayed Pattern when the Patterns view exists, or fall
+		// back to the saved display state on the view-less AI page so the switch
+		// source still names the Pattern the human last displayed. Approval
+		// captures the target and creates the session.
+		if(tool == "switch_pattern" && (!capability || document != target))
+		{
+			auto *view = PatternView(*target);
+			const PATTERNINDEX source = view ? view->GetCurrentPattern() : SavedPatternDisplay(*target);
+			capability = std::make_unique<PatternCapability>(*target, source, view ? view->AISelection() : std::nullopt);
+			document = target;
+		}
+		// A session-less context read binds to the Patterns view. It must never
+		// replace a facade that is waiting on a switch: the reservation and the
+		// wire request waiting on it have to survive other readers.
+		if(tool == "get_pattern_context" && !args.contains("session") && (!capability || (!capability->Occupied() && !capability->PendingSwitch() && !capability->HasProposal())))
 		{
 			auto *view = PatternView(*target);
 			if(!view) return Failure("patternRequired", "Open the document's Patterns tab first");
@@ -633,10 +766,14 @@ public:
 			document = target;
 		}
 		if(!capability || document != target) return Failure("occupancyLost", "Start with an occupied context read");
-		capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
+		// Push every independent preference on each dispatch; a partial Configure
+		// call would silently reset the switch/accept preferences.
+		ConsumeConfigure(capability->Configure(seconds, always.GetCheck() == BST_CHECKED, alwaysSwitch.GetCheck() == BST_CHECKED, alwaysAccept.GetCheck() == BST_CHECKED));
 		auto result = capability->Call(tool, args);
 		if(capability->Occupied() && result.value("ok", false) && result.contains("session")) capabilityConnection = connection;
+		else if(capability->PendingSwitch()) capabilityConnection = connection;
 		else if(!capability->Occupied()) capabilityConnection = 0;
+		if(result.value("status", std::string{}) == "switched" && document) SynchronizePatternDisplay(*document, capability->Pattern());
 		return result;
 	}
 	std::optional<ModCommand> CurrentCell(const Json &cell) const
@@ -650,6 +787,7 @@ public:
 		return *sf.Patterns[capability->Pattern()].GetpModCommand(row, channel);
 	}
 	void RefreshReview();
+	void ConsumeConfigure(Json result);
 	BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
 	afx_msg void OnTimer(UINT_PTR);
 	DECLARE_MESSAGE_MAP()
@@ -665,21 +803,52 @@ void Panel::RefreshReview()
 	if(reviewPanel) reviewPanel->Refresh();
 }
 
+void Panel::ConsumeConfigure(Json result)
+{
+	if(!capability) return;
+	// Configure resolves work that was waiting on a preference: an existing
+	// Pattern switch when "Always allow Pattern switching" is turned on, or an
+	// existing proposal when "Always accept submissions" is turned on. A wire
+	// request waiting for that work must receive the resolution, and its
+	// connection keeps ownership of the resulting session.
+	const bool resolved = result.contains("status") || result.contains("ending_reminder");
+	if(!resolved) return;
+	if(document && result.value("status", std::string{}) == "switched")
+		SynchronizePatternDisplay(*document, capability->Pattern());
+	lastMessage = Text(result.dump());
+	if(pending)
+	{
+		if(result.value("ok", false) && capability->Occupied()) capabilityConnection = pending->connection;
+		pending->Complete(std::move(result));
+		pending.reset();
+	}
+	RefreshReview();
+}
+
 BOOL Panel::OnCommand(WPARAM wParam, LPARAM lParam)
 {
 	const UINT id = LOWORD(wParam);
 	try
 	{
 		if(id == Publish) PublishActiveDocument();
-		if(id == SettingsSave || id == Enable || id == AlwaysApprove)
+		if(id == SettingsSave || id == Enable || id == AlwaysApprove || id == AlwaysSwitch || id == AlwaysAccept)
 		{
 			CString value; timeout.GetWindowText(value); seconds = std::clamp(_ttoi(value), 1, 3600);
+			const bool rangeAlways = always.GetCheck() == BST_CHECKED;
+			const bool switchAlways = alwaysSwitch.GetCheck() == BST_CHECKED;
+			const bool acceptAlways = alwaysAccept.GetCheck() == BST_CHECKED;
 			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("Enabled"), enable.GetCheck() != 0);
-			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysApprove"), always.GetCheck() != 0);
+			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysApprove"), rangeAlways);
+			// The switch and submission preferences persist independently of the
+			// range-expansion preference.
+			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysSwitch"), switchAlways);
+			theApp.GetSettings().Write<bool>(U_("AI/MCP"), U_("AlwaysAccept"), acceptAlways);
 			theApp.GetSettings().Write<unsigned>(U_("AI/MCP"), U_("TimeoutSeconds"), seconds);
 			if(!enable.GetCheck()) { ReleaseNow(); broker.reset(); }
 			else if(!broker) broker = CreateBroker();
-			if(capability) capability->Configure(seconds, always.GetCheck() == BST_CHECKED);
+			// One Configure call carries every independent preference; a partial
+			// call would silently reset the switch/accept preferences.
+			if(capability) ConsumeConfigure(capability->Configure(seconds, rangeAlways, switchAlways, acceptAlways));
 		}
 		RefreshReview();
 	} catch(const std::exception &) { lastMessage = _T("Operation failed; document was not changed."); }
@@ -742,7 +911,7 @@ void Panel::OnTimer(UINT_PTR)
 		RefreshIdentity();
 		if(capability) capability->Tick();
 		if(document && displayedRevision != document->AIRevision()) { displayedRevision = document->AIRevision(); RefreshReview(); }
-		if(pending && capability && !capability->Occupied()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
+		if(pending && capability && !capability->Occupied() && !capability->PendingSwitch()) { pending->Complete(Failure("occupancyLost", "Session expired")); pending.reset(); }
 		// Ticket 31 AC4: drain disconnect notices before new work so a
 		// vanished client's occupancy is released before its successor's
 		// reattach is dispatched.
@@ -812,29 +981,51 @@ void ReviewPanel::LayoutChildren()
 	CRect client;
 	GetClientRect(&client);
 	const int cx = std::max<int>(client.Width(), 320);
-	const int cy = std::max<int>(client.Height(), 90);
-	const double sx = std::clamp((cx - 24.0) / (1052.0 - 24.0), 0.4, 2.0);
-	const auto X = [sx](int x) { return static_cast<int>((x - 12) * sx + 12.5); };
+	const int cy = std::max<int>(client.Height(), 120);
 	const UINT flags = SWP_NOZORDER | SWP_NOACTIVATE;
-
+	const int margin = 12, gap = 8, height = 34, lineGap = 6;
 	int y = 8;
-	const int statusH = std::min(45, std::max(30, cy / 5));
-	statusRect.SetRect(X(12), y, X(1040), y + statusH);
+	const int statusH = std::min(64, std::max(44, cy / 5));
+	statusRect.SetRect(margin, y, cx - margin, y + statusH);
 	y += statusH + 6;
-	const int buttonsTop = y;
-	y += 34 + 6;
+	int x = margin;
+	// Buttons wrap when their captions would no longer fit side by side; the
+	// approval captions change between switch and expansion wording, so widths
+	// are measured from the current text instead of fixed columns.
+	const auto measure = [this](CButton &control, int minimum, int maximum)
+	{
+		CString caption;
+		control.GetWindowText(caption);
+		CClientDC dc(this);
+		CFont *font = control.GetFont();
+		CFont *previous = font ? dc.SelectObject(font) : nullptr;
+		const int width = dc.GetTextExtent(caption).cx + 16;
+		if(previous) dc.SelectObject(previous);
+		return std::clamp(width, minimum, maximum);
+	};
+	const auto place = [&](CButton &control, int preferred)
+	{
+		const int width = std::max(60, std::min(preferred, cx - 2 * margin));
+		if(x > margin && x + width > cx - margin)
+		{
+			x = margin;
+			y += height + lineGap;
+		}
+		control.SetWindowPos(nullptr, x, y, width, height, flags);
+		x += width + gap;
+	};
+	place(release, measure(release, 110, 220));
+	place(approve, measure(approve, 130, 260));
+	place(decline, measure(decline, 130, 260));
+	place(apply, measure(apply, 130, 260));
+	place(reject, measure(reject, 130, 260));
+	y += height + lineGap;
 	const int remaining = std::max(0, cy - y - 8);
 	const int listH = std::max(16, remaining * 2 / 5);
 	const int drawnH = std::max(16, remaining - listH - 6);
-	listRect.SetRect(X(12), y, X(1040), y + listH);
+	listRect.SetRect(margin, y, cx - margin, y + listH);
 	y += listH + 6;
-	evidenceRect.SetRect(X(12), y, X(1040), y + drawnH);
-
-	release.SetWindowPos(nullptr, X(12), buttonsTop, std::max(40, X(205) - X(12)), 34, flags);
-	approve.SetWindowPos(nullptr, X(215), buttonsTop, std::max(40, X(410) - X(215)), 34, flags);
-	decline.SetWindowPos(nullptr, X(420), buttonsTop, std::max(40, X(615) - X(420)), 34, flags);
-	apply.SetWindowPos(nullptr, X(625), buttonsTop, std::max(40, X(820) - X(625)), 34, flags);
-	reject.SetWindowPos(nullptr, X(830), buttonsTop, std::max(40, X(1035) - X(830)), 34, flags);
+	evidenceRect.SetRect(margin, y, cx - margin, y + drawnH);
 	evidence.SetWindowPos(nullptr, listRect.left, listRect.top, listRect.Width(), listRect.Height(), flags);
 	Invalidate(FALSE);
 }
@@ -865,10 +1056,24 @@ void ReviewPanel::Refresh()
 void ReviewPanel::UpdateControls()
 {
 	if(!service || !GetSafeHwnd()) return;
+	// The same two controls resolve both approval kinds; their captions follow
+	// the pending request so the owner always sees what is being approved.
+	const bool switchPending = service->capability && service->capability->PendingSwitch();
+	bool relabel = false;
+	CString caption;
+	approve.GetWindowText(caption);
+	const CString approveText = switchPending ? _T("Approve Pattern switch") : _T("Approve expansion");
+	if(caption != approveText) { approve.SetWindowText(approveText); relabel = true; }
+	decline.GetWindowText(caption);
+	const CString declineText = switchPending ? _T("Reject Pattern switch") : _T("Decline expansion");
+	if(caption != declineText) { decline.SetWindowText(declineText); relabel = true; }
 	approve.EnableWindow(service->pending != nullptr);
 	decline.EnableWindow(service->pending != nullptr);
 	apply.EnableWindow(service->capability && service->capability->HasProposal());
 	reject.EnableWindow(service->capability && service->capability->HasProposal());
+	// The captions determine the measured button widths, so wrapped rows are
+	// laid out again when the labels change.
+	if(relabel) LayoutChildren();
 }
 
 void ReviewPanel::RefreshStatus()
@@ -890,8 +1095,11 @@ void ReviewPanel::OnPaint()
 	// The upper connection panel is the home of MCP status; this pane only
 	// reports review state so connection information is never duplicated here.
 	CString state;
-	if(service && service->capability && service->capability->Occupied())
-		state = service->pending ? _T("AI OCCUPIED - expansion approval waiting (timer paused)") : _T("AI OCCUPIED - navigation and playback available; writes blocked");
+	const bool switchPending = service && service->capability && service->capability->PendingSwitch();
+	if(switchPending)
+		state = service->pending ? _T("AI OCCUPIED - Pattern switch approval waiting (timer paused)") : _T("AI OCCUPIED - Pattern switch approval waiting");
+	else if(service && service->capability && service->capability->Occupied())
+		state = service->pending ? _T("AI OCCUPIED - range expansion approval waiting (timer paused)") : _T("AI OCCUPIED - navigation and playback available; writes blocked");
 	else if(service && service->capability && service->capability->HasProposal())
 		state = _T("AI released - proposal retained for review");
 	else
@@ -901,11 +1109,31 @@ void ReviewPanel::OnPaint()
 	dc.TextOut(statusRect.left, statusRect.top + 1, state);
 	if(service && service->pending && service->capability)
 	{
-		const auto range = service->capability->ExpansionRange();
-		CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
-			range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
-			range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
-		dc.TextOut(statusRect.left, statusRect.top + 23, grant);
+		if(service->capability->PendingSwitch())
+		{
+			// A switch reservation authorizes the whole target Pattern, so show
+			// the exact source and target identity plus the granted scope.
+			const auto range = service->capability->SwitchRange();
+			const CString sourceName = Text(range.value("source_name", std::string{}));
+			const CString targetName = Text(range.value("target_name", std::string{}));
+			CString source, target, detail;
+			source.Format(_T("%d"), range.value("source_pattern", -1));
+			if(!sourceName.IsEmpty()) source += _T(" \"") + sourceName + _T("\"");
+			target.Format(_T("%d"), range.value("target_pattern", -1));
+			if(!targetName.IsEmpty()) target += _T(" \"") + targetName + _T("\"");
+			detail.Format(_T("Switch Pattern %s -> %s. Grant: all %d rows x %d channels (full Pattern, %s session)."),
+				source.GetString(), target.GetString(), range.value("target_rows", 0), range.value("target_channels", 0),
+				range.value("authenticated", false) ? _T("retained") : _T("new"));
+			dc.TextOut(statusRect.left, statusRect.top + 23, detail);
+		}
+		else
+		{
+			const auto range = service->capability->ExpansionRange();
+			CString grant; grant.Format(_T("Requested: rows %d-%d, channel %d. Current grant: rows %d-%d, channels %d-%d (1-based channels)."),
+				range["first_row"].get<int>(), range["last_row"].get<int>(), range["channel"].get<int>() + 1,
+				range["grant_first_row"].get<int>(), range["grant_last_row"].get<int>(), range["grant_first_channel"].get<int>() + 1, range["grant_last_channel"].get<int>() + 1);
+			dc.TextOut(statusRect.left, statusRect.top + 23, grant);
+		}
 	} else if(service)
 		dc.TextOut(statusRect.left, statusRect.top + 23, service->lastMessage);
 	DrawEvidence(dc);
@@ -957,7 +1185,19 @@ BOOL ReviewPanel::OnCommand(WPARAM wParam, LPARAM lParam)
 		if(id == Release) service->ReleaseNow();
 		if((id == Approve || id == Decline) && service->pending && service->capability)
 		{
-			service->pending->Complete(service->capability->ResolveExpansion(id == Approve)); service->pending.reset();
+			// The same controls resolve a pending expansion or a pending switch.
+			const bool switchPending = service->capability->PendingSwitch();
+			Json result = switchPending ? service->capability->ResolveSwitch(id == Approve)
+				: service->capability->ResolveExpansion(id == Approve);
+			if(result.value("status", std::string{}) == "switched" && service->document)
+				SynchronizePatternDisplay(*service->document, service->capability->Pattern());
+			if(result.value("ok", false) && service->capability->Occupied())
+				service->capabilityConnection = service->pending->connection;
+			else if(!service->capability->Occupied())
+				service->capabilityConnection = 0;
+			service->lastMessage = Text(result.dump());
+			service->pending->Complete(std::move(result));
+			service->pending.reset();
 		}
 		if(id == Apply && service->capability) service->lastMessage = Text(service->capability->Apply().dump());
 		if(id == Reject && service->capability) { service->capability->Reject(); service->lastMessage = _T("Proposal rejected."); }
@@ -1205,12 +1445,12 @@ bool IsReadOnlyCommand(UINT command)
 
 bool BlockCommand(UINT command)
 {
-	return panel && panel->capability && panel->capability->Occupied() && !IsReadOnlyCommand(command);
+	return panel && panel->capability && (panel->capability->Occupied() || panel->capability->PendingSwitch()) && !IsReadOnlyCommand(command);
 }
 
 bool FilterInput(MSG &msg)
 {
-	if(!panel || !panel->capability || !panel->capability->Occupied()) return false;
+	if(!panel || !panel->capability || (!panel->capability->Occupied() && !panel->capability->PendingSwitch())) return false;
 	if(msg.hwnd == panel->m_hWnd || ::IsChild(panel->m_hWnd, msg.hwnd)) return false;
 	// Review controls live in their own window; they must stay usable while the
 	// document is AI-occupied, so their input is never filtered.
