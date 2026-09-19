@@ -15,7 +15,7 @@ long-running Sidecar reads that current-user target file and attaches to the
 exact published lifetime identities. The translator also exposes the
 cross-Pattern slice: `get_pattern_order` reads the current Sequence order
 through the app without requesting occupancy, `reorder_pattern_order` applies
-a complete Order-index permutation during a retained session, and `switch_pattern` requests or
+a complete Order-index permutation and can insert valid unreferenced Patterns during a retained session, and `switch_pattern` requests or
 performs an approved rebinding to another Pattern while the connection keeps
 one retained session.
 
@@ -217,6 +217,9 @@ The eight tool schemas are in `openmpt_mcp.py`. Pattern and Order indices are
 app-owned and zero-based; `switch_pattern` is the only way to change the bound Pattern,
 and manual navigation in OpenMPT never rebinds it. Ranges and channels are also
 zero-based.
+For `reorder_pattern_order`, integer items identify existing source Order entries
+and must each appear exactly once; an object such as `{"pattern": 12}` inserts that
+currently unreferenced Pattern at the object's destination position.
 Segment entries use absolute row indices with all six raw cell fields; omitted
 rows represent empty desired cells. The app alone validates musical semantics,
 format constraints, preservation and envelope approvals. Score Context's

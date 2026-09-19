@@ -5,7 +5,7 @@ description: Operate the OpenMPT Pattern MCP tools to read or reorder the curren
 
 # OpenMPT MCP
 
-Use the connected Pattern capability as a one-Pattern-at-a-time proposal workflow. Tracker-cell tools edit a private candidate; a frozen proposal is applied only after human approval or a saved automatic-accept preference. `reorder_pattern_order` is the explicit structural exception: it applies a validated permutation immediately inside a retained session. Read every result for its actual `status`.
+Use the connected Pattern capability as a one-Pattern-at-a-time proposal workflow. Tracker-cell tools edit a private candidate; a frozen proposal is applied only after human approval or a saved automatic-accept preference. `reorder_pattern_order` is the explicit structural exception: it immediately applies a validated permutation, optionally with insertions of valid Patterns not yet referenced by the current Sequence, inside a retained session. Read every result for its actual `status`.
 
 ## Tracker Pattern basics
 

@@ -671,23 +671,53 @@ Json PatternCapability::ReorderPatternOrder(const Json &args)
 	auto &sf = m_doc.GetSoundFile();
 	auto &sequence = sf.Order();
 	const auto &requested = args.at("order");
-	if(requested.size() != sequence.size())
+	if(requested.size() < sequence.size())
 		return Failure("validationFailure", "order must contain every current Order index exactly once");
+	if(requested.size() > sf.GetModSpecifications().ordersMax)
+		return Failure("validationFailure", "The resulting Order exceeds the current format limit");
 	std::vector<bool> seen(sequence.size(), false);
-	std::vector<ORDERINDEX> permutation;
-	permutation.reserve(sequence.size());
-	for(const auto &value : requested)
+	std::vector<PATTERNINDEX> insertedPatterns;
+	std::vector<PATTERNINDEX> reordered;
+	std::vector<ORDERINDEX> inverse(sequence.size());
+	Json inserted = Json::array();
+	reordered.reserve(requested.size());
+	bool changed = requested.size() != sequence.size();
+	for(size_t destination = 0; destination < requested.size(); ++destination)
 	{
-		if(!value.is_number_integer()) return Failure("validationFailure", "Every order entry must be an integer index");
+		const auto &value = requested[destination];
+		if(value.is_number_integer())
+		{
+			long long index = -1;
+			try { index = value.get<long long>(); } catch(const std::exception &) { return Failure("validationFailure", "Order index is out of range"); }
+			if(index < 0 || static_cast<size_t>(index) >= sequence.size() || seen[static_cast<size_t>(index)])
+				return Failure("validationFailure", "order must contain every current Order index exactly once");
+			seen[static_cast<size_t>(index)] = true;
+			inverse[static_cast<size_t>(index)] = static_cast<ORDERINDEX>(destination);
+			reordered.push_back(sequence[static_cast<size_t>(index)]);
+			changed = changed || static_cast<size_t>(index) != destination;
+			continue;
+		}
+		if(!value.is_object() || value.size() != 1 || !value.contains("pattern") || !value.at("pattern").is_number_integer())
+			return Failure("validationFailure", "Every order item must be a source Order index or a {pattern: number} insertion");
 		long long index = -1;
-		try { index = value.get<long long>(); } catch(const std::exception &) { return Failure("validationFailure", "Order index is out of range"); }
-		if(index < 0 || static_cast<size_t>(index) >= sequence.size() || seen[static_cast<size_t>(index)])
-			return Failure("validationFailure", "order must be a permutation of the current Order indices");
-		seen[static_cast<size_t>(index)] = true;
-		permutation.push_back(static_cast<ORDERINDEX>(index));
+		try { index = value.at("pattern").get<long long>(); } catch(const std::exception &) { return Failure("validationFailure", "Pattern index is out of range"); }
+		if(index < 0 || static_cast<size_t>(index) >= sf.Patterns.Size())
+			return Failure("validationFailure", "Pattern index is out of range");
+		const auto pattern = static_cast<PATTERNINDEX>(index);
+		if(!sf.Patterns.IsValidPat(pattern))
+			return Failure("validationFailure", "Only an existing Pattern can be inserted into Order");
+		if(sequence.FindOrder(pattern) != ORDERINDEX_INVALID)
+			return Failure("validationFailure", "Only a Pattern not already referenced by the current Sequence can be inserted");
+		if(std::find(insertedPatterns.begin(), insertedPatterns.end(), pattern) != insertedPatterns.end())
+			return Failure("validationFailure", "An unreferenced Pattern can be inserted only once per call");
+		insertedPatterns.push_back(pattern);
+		reordered.push_back(pattern);
+		auto info = PatternInfo(pattern);
+		info["order"] = destination;
+		inserted.push_back(std::move(info));
 	}
-	bool changed = false;
-	for(size_t i = 0; i < permutation.size(); ++i) changed = changed || permutation[i] != i;
+	if(std::find(seen.begin(), seen.end(), false) != seen.end())
+		return Failure("validationFailure", "order must contain every current Order index exactly once");
 	if(!changed)
 	{
 		auto result = PatternOrder();
@@ -695,15 +725,9 @@ Json PatternCapability::ReorderPatternOrder(const Json &args)
 		result["session"] = m_token;
 		return result;
 	}
-	std::vector<PATTERNINDEX> reordered(sequence.size());
-	std::vector<ORDERINDEX> inverse(sequence.size());
-	for(size_t destination = 0; destination < permutation.size(); ++destination)
-	{
-		reordered[destination] = sequence[permutation[destination]];
-		inverse[permutation[destination]] = static_cast<ORDERINDEX>(destination);
-	}
 	{
 		CriticalSection cs;
+		sequence.resize(static_cast<ORDERINDEX>(reordered.size()));
 		for(size_t i = 0; i < reordered.size(); ++i) sequence[i] = reordered[i];
 		if(sequence.GetRestartPos() < inverse.size()) sequence.SetRestartPos(inverse[sequence.GetRestartPos()]);
 		if(sf.m_PlayState.m_nCurrentOrder < inverse.size()) sf.m_PlayState.m_nCurrentOrder = inverse[sf.m_PlayState.m_nCurrentOrder];
@@ -715,6 +739,7 @@ Json PatternCapability::ReorderPatternOrder(const Json &args)
 	auto result = PatternOrder();
 	result["status"] = "reordered";
 	result["session"] = m_token;
+	result["inserted_patterns"] = std::move(inserted);
 	return result;
 }
 

@@ -38,7 +38,7 @@ void AIPatternTests(const CString &fixture)
 		sf.Order()[1] = PATTERNINDEX_SKIP;
 		sf.Order()[3] = PATTERNINDEX_INVALID;
 		sf.Order()[4] = 999;
-		AI::PatternCapability cap(*doc, 0, {});
+		AI::PatternCapability cap(*doc, 1, {});
 		const auto order = cap.Call("get_pattern_order", AI::Json::object());
 		Require(OK(order), "Pattern order can be read without starting a session");
 		Require(!doc->AIOccupied() && !order.contains("session"), "Order inspection never acquires write occupancy");
@@ -61,7 +61,22 @@ void AIPatternTests(const CString &fixture)
 		Require(reordered["entries"][0]["kind"] == "invalid" && reordered["entries"][1]["pattern"] == 0
 			&& reordered["entries"][3]["kind"] == "skip" && reordered["entries"][4]["kind"] == "stop",
 			"Order reordering moves every original entry, including markers");
-		Require(cap.Call("reorder_pattern_order", {{"session", token}, {"order", AI::Json::array({0, 1, 2, 3, 4})}})["status"] == "unchanged",
+		AI::Json duplicateInsertion = AI::Json::array({0, 1, 2, 3, 4});
+		duplicateInsertion.push_back({{"pattern", 0}});
+		const auto rejectedInsertion = cap.Call("reorder_pattern_order", {{"session", token}, {"order", duplicateInsertion}});
+		Require(ErrorCode(rejectedInsertion) == "validationFailure" && sf.Order().size() == 5,
+			"Order insertion accepts only Patterns absent from the current Sequence");
+		AI::Json insertion = AI::Json::array({0});
+		insertion.push_back({{"pattern", 1}});
+		for(int sourceOrder = 1; sourceOrder < 5; ++sourceOrder) insertion.push_back(sourceOrder);
+		const auto inserted = cap.Call("reorder_pattern_order", {{"session", token}, {"order", insertion}});
+		Require(OK(inserted) && inserted["status"] == "reordered" && inserted["session"] == token
+			&& inserted["entries"].size() == 6 && inserted["entries"][1]["pattern"] == 1,
+			"An edited bound Pattern absent from Order can be inserted at a chosen destination");
+		Require(inserted["inserted_patterns"].size() == 1 && inserted["inserted_patterns"][0]["pattern"] == 1
+			&& inserted["inserted_patterns"][0]["order"] == 1 && inserted["unreferenced_patterns"].empty(),
+			"Order insertion reports the new reference and removes it from the unreferenced list");
+		Require(cap.Call("reorder_pattern_order", {{"session", token}, {"order", AI::Json::array({0, 1, 2, 3, 4, 5})}})["status"] == "unchanged",
 			"Identity Order permutation is an authenticated no-op");
 		cap.Call("abort_session", {{"session", token}});
 		const auto sequence = sf.Order.AddSequence();

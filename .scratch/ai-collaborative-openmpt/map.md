@@ -42,12 +42,13 @@ A clear implementation path to a locally useful personal OpenMPT derivative in w
 - [Minimum AI Pattern capability slice](issues/23-choose-minimum-ai-pattern-capability-slice.md): expose one immutable Pattern query, one single-channel contiguous raw-cell segment replacement, and explicit handoff/abort/release calls; keep candidate state private, validate each batch all-or-nothing, use an internal Pattern-and-dependencies stale signature, normalize the final proposal, and reserve atomic Apply plus one ordinary Undo step for the human UI while all broader AI capabilities remain unavailable.
 - [Local MCP round-trip seam](issues/24-prototype-local-mcp-round-trip.md): the accepted minimum logic uses a client-launched stdio Sidecar as a translator, explicit app and document attachment, a protocol-neutral app envelope, and an app broker that validates and queues while only the document owning thread captures Pattern Score Context; the prototype establishes this state boundary and typed failure shape, not real stdio, named-pipe, MFC-dispatch, or native serializer connectivity.
 - [First proposal-review-Apply loop](issues/25-prototype-first-proposal-review-apply-loop.md): retain occupancy across multiple single-voice candidate calls, keep candidate cells private until immutable handoff, review one normalized whole-proposal diff through synchronized Tracker/Piano Roll evidence, reject stale or partial application, commit the whole proposal atomically, hear it through normal playback, and reverse it with one ordinary Undo; the accepted state model does not establish real MCP/native integration or musical usefulness.
+- [Harness audio analysis core](issues/36-add-harness-audio-analysis-core.md): use PydanticAI as a replaceable Python-side orchestration layer; reuse native Piano Roll timbre audition and bounded passage export; expose both through MCP with human and multimodal-AI provenance, revision-bound results, and no direct musical mutation.
 
 ## Not yet specified
 
 - Which additional Pattern, Order, instrument, sample, plugin, filesystem, and export capabilities become useful after the first bounded Pattern workflow.
 - Whether real use justifies partial Review Unit acceptance, mandatory audition, impact tiers, the complete mature lease, Operation Receipts, multi-instance routing, or broader fault-injection work beyond the first slice's minimal occupancy.
-- Whether audio review should become part of the ordinary AI loop, remain an optional enrichment, or be omitted.
+- Whether the standalone audio review should later become part of the ordinary AI loop or remain an optional enrichment; issue 36 defines the standalone implementation boundary without making it a prerequisite for the first Pattern loop.
 - Whether later phases should model tracker-specific playback semantics such as NNA, note delay, retrigger, and inferred note duration more deeply in the Piano Roll.
 
 ## Out of scope

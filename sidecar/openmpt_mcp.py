@@ -26,6 +26,9 @@ CELL = object_schema({name: {"type": "integer", "minimum": 0, "maximum": 255}
 RANGE = object_schema({"first_row": INTEGER, "row_count": {"type": "integer", "minimum": 1},
                        "first_channel": INTEGER, "channel_count": {"type": "integer", "minimum": 1}},
                       ("first_row", "row_count", "first_channel", "channel_count"))
+ORDER_INSERTION = object_schema(
+    {"pattern": dict(INTEGER, description="Zero-based Pattern index currently absent from this Sequence.")},
+    ("pattern",))
 TOOLS = [
     {"name": "get_pattern_context", "description": "Read sparse semantic Score Context of the bound Pattern. Defaults to the candidate and the whole Pattern. Reads can exceed the write envelope. occupy=true retains occupancy. " + ENDING,
      "inputSchema": object_schema({"session": SESSION, "occupy": {"type": "boolean"},
@@ -37,9 +40,9 @@ TOOLS = [
                                    ("session", "channel", "first_row", "row_count", "cells"))},
     {"name": "get_pattern_order", "description": "Read the current Sequence order without requesting write occupancy: one entry per Order index in order, preserving duplicate, skip and stop markers, plus the number, name and row count of valid Patterns and valid Patterns not referenced by the Sequence.",
      "inputSchema": object_schema({})},
-    {"name": "reorder_pattern_order", "description": "Reorder the current Sequence while preserving every Order entry. Requires a retained session. Pass order as the complete destination-to-source permutation of the zero-based Order indices returned by get_pattern_order; duplicates, skip markers and stop markers move with their source entries. The operation applies immediately, keeps the bound Pattern and session, and returns the resulting Sequence order. " + ENDING,
-     "inputSchema": object_schema({"session": SESSION, "order": {"type": "array", "items": INTEGER,
-                                                                  "description": "Every current zero-based Order index exactly once, in desired order."}}, ("session", "order"))},
+    {"name": "reorder_pattern_order", "description": "Rebuild the current Sequence while preserving every existing Order entry and optionally inserting valid Patterns that it does not yet reference. Requires a retained session. In order, use each zero-based source Order index returned by get_pattern_order exactly once; place {pattern: N} wherever an entry for an unreferenced Pattern N should be inserted. Existing duplicate references, skip markers and stop markers move with their source entries. The operation applies immediately, keeps the bound Pattern and session, and returns the resulting Sequence order. " + ENDING,
+     "inputSchema": object_schema({"session": SESSION, "order": {"type": "array", "items": {"oneOf": [INTEGER, ORDER_INSERTION]},
+                                                                  "description": "Every current source Order index exactly once, plus optional {pattern: N} insertions, in desired destination order."}}, ("session", "order"))},
     {"name": "switch_pattern", "description": "Request a switch of the edit binding to the zero-based pattern, optionally authenticated by the session token of a retained session. Without a session the request waits for human approval in OpenMPT. Uncommitted candidate edits or a pending proposal must be applied, rejected or cancelled first. Approval creates a missing format-valid target Pattern at the requested index, appends it to the effective end of the current Order, then captures and authorizes the whole Pattern (all rows and channels), returning a fresh session token. Duplicate order references address the same Pattern; each proposal and Undo touches exactly one Pattern. " + ENDING,
      "inputSchema": object_schema({"session": SESSION, "pattern": dict(INTEGER, description="Zero-based target Pattern index.")}, ("pattern",))},
     {"name": "handoff_for_review", "description": "Freeze the entire final proposal and release occupancy atomically. The frozen single-Pattern proposal may be applied automatically (status applied) or wait for human review (status pending_review); either way occupancy ends. " + ENDING,

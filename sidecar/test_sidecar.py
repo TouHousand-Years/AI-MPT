@@ -122,6 +122,10 @@ class SidecarTests(unittest.TestCase):
             "abort_session", "release_occupancy",
             "get_pattern_order", "reorder_pattern_order", "switch_pattern",
         })
+        reorder = next(t for t in replies[1]["result"]["tools"] if t["name"] == "reorder_pattern_order")
+        item_schema = reorder["inputSchema"]["properties"]["order"]["items"]["oneOf"]
+        self.assertEqual(item_schema[0]["type"], "integer")
+        self.assertEqual(item_schema[1]["required"], ["pattern"])
 
     def test_switch_token_pins_document_until_failed_auto_apply_finishes_session(self):
         with tempfile.TemporaryDirectory() as directory:
