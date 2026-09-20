@@ -55,4 +55,4 @@ include_dependency "mpt-libopenmpt.lua"
 	defines { "MPT_WITH_MFC" }
 
   filter {}
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }

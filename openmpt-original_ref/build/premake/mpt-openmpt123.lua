@@ -98,4 +98,4 @@ include_dependency "mpt-libopenmpt.lua"
 			linkoptions { "wsetargv.obj" }
 		filter {}
 	end
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }

@@ -42,6 +42,18 @@ static const char *NoteKind(ModCommand::NOTE note)
 	default: return "special";
 	}
 }
+static bool IsWritableNote(const CModSpecifications &spec, ModCommand::NOTE note)
+{
+	if(note == NOTE_NONE || ModCommand::IsNote(note)) return spec.HasNote(note);
+	return (note == NOTE_KEYOFF || note == NOTE_NOTECUT || note == NOTE_FADE) && spec.HasNote(note);
+}
+static Json WritableSpecialNotes(const CModSpecifications &spec)
+{
+	Json notes = Json::array();
+	for(const auto note : {NOTE_KEYOFF, NOTE_NOTECUT, NOTE_FADE})
+		if(spec.HasNote(note)) notes.push_back({{"id", note}, {"kind", NoteKind(note)}});
+	return notes;
+}
 static Json Raw(const ModCommand &cell)
 {
 	return {{"note", cell.note}, {"instrument", cell.instr}, {"volume_command", cell.volcmd},
@@ -223,6 +235,7 @@ Json PatternCapability::ContextFor(PATTERNINDEX patternIndex, ROWINDEX rowCount,
 			{"tempo_mode", int(sf.m_nTempoMode)}, {"rows_per_beat", pattern.GetOverrideSignature() ? pattern.GetRowsPerBeat() : sf.m_nDefaultRowsPerBeat},
 			{"rows_per_measure", pattern.GetOverrideSignature() ? pattern.GetRowsPerMeasure() : sf.m_nDefaultRowsPerMeasure}}},
 		{"format", {{"name", spec.fileExtension}, {"note_min", spec.noteMin}, {"note_max", spec.noteMax}, {"note_off", spec.hasNoteOff},
+			{"special_notes", WritableSpecialNotes(spec)},
 			{"volume_max", spec.HasVolCommand(VOLCMD_VOLUME) ? MaxVolume : 0}, {"volume_commands", std::move(volumeCommands)},
 			{"effect_commands", std::move(effectCommands)}, {"rows_max", spec.patternRowsMax}, {"channels_max", spec.channelsMax}}},
 		{"instruments", instruments}, {"samples", samples}};
@@ -388,13 +401,13 @@ Json PatternCapability::Validate(const ModCommand &before, const ModCommand &aft
 	};
 	if(SameRaw(before, after)) return {{"ok", true}};
 	if(before.IsPcNote()) return error("note", after.note, "PC/PCS cells must be preserved byte-for-byte");
-	const bool supportedBefore = before.note == NOTE_NONE || before.IsNote() || before.note == NOTE_KEYOFF;
+	const bool supportedBefore = IsWritableNote(spec, before.note);
 	if(!supportedBefore && (after.note != before.note || after.instr != before.instr))
 		return error("note", after.note, "Preserve the note and instrument of unsupported special-note cells");
 	if(after.note != before.note)
 	{
-		const bool validNote = after.note == NOTE_NONE || (after.IsNote() && spec.HasNote(after.note)) || (after.note == NOTE_KEYOFF && spec.hasNoteOff);
-		if(!validNote) return error("note", after.note, "Only format-supported pitched notes, empty notes and note-offs can be written");
+		if(!IsWritableNote(spec, after.note))
+			return error("note", after.note, "Only format-supported pitched notes, empty notes and advertised special notes can be written");
 	}
 	if(after.instr != before.instr && after.instr && (sf.GetNumInstruments() ? (after.instr > sf.GetNumInstruments() || !sf.Instruments[after.instr]) : after.instr > sf.GetNumSamples()))
 		return error("instrument", after.instr, "Instrument/sample reference does not exist");

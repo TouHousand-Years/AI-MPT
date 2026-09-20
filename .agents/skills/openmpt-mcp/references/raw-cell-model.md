@@ -19,11 +19,11 @@ Every supplied replacement cell must contain all six fields, each from 0 through
 
 - `note: 0` is empty.
 - Pitched notes use OpenMPT numbering: `1` is C-0 and `61` is C-5 (middle C / MIDI 60). For ordinary 12-tone notes, raw note = MIDI note + 1.
-- `note: 255` is note-off and is writable only when `context.format.note_off` is true.
+- `context.format.special_notes` lists every special note that is writable in the bound format. Use only the published raw `id` values; their `kind` distinguishes `note_off` (`===`), `note_cut` (`^^^`), and `note_fade` (`~~~`).
 - Create pitched notes only inside `context.format.note_min` through `note_max`.
 - A nonzero instrument must name an existing entry in `context.instruments`; when there are no instruments, it may refer to an existing `context.samples` entry.
 
-Use each returned cell's `note_kind` and `note_name` as the semantic reading. Preserve plugin-control cells byte-for-byte. For note cuts, fades, and other unsupported special notes, preserve the note and instrument; their ordinary volume and effect columns remain independently editable when the format supports the requested commands.
+Use each returned cell's `note_kind` and `note_name` as the semantic reading. Preserve plugin-control cells byte-for-byte. Preserve any special note absent from `context.format.special_notes`, including its instrument; its ordinary volume and effect columns remain independently editable when the format supports the requested commands.
 
 ## Volume and effects
 

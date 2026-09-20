@@ -221,4 +221,4 @@ end
       "../../build/vs/debug/openmpt.natvis",
     }
   filter {}
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }

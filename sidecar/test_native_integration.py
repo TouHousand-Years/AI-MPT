@@ -145,6 +145,36 @@ class NativeIntegrationTests(unittest.TestCase):
                     client.close()
                 self.stop_app(app, stop)
 
+    def test_always_switch_without_selection_defaults_to_first_order_pattern(self):
+        with tempfile.TemporaryDirectory(prefix="openmpt-ai-default-pattern-") as directory:
+            report, stop = Path(directory) / "endpoint.json", Path(directory) / "stop"
+            # Display Pattern 1 first: the fallback must still follow Order, whose
+            # first valid entry in the fixture is Pattern 0.
+            app, _, endpoint = self.start_app(report, stop, 1)
+            client = probe.PipeClient(endpoint["pipe"])
+            preference = None
+            try:
+                preference = self.checked_control(app, "Always allow Pattern switching")
+                if not preference:
+                    self.click_control(app, "Always allow Pattern switching")
+                self.activate_page(app, 49001)  # No live Patterns view or drawn selection.
+                client.connect()
+                self.assertTrue(client.transact(probe.envelope(endpoint["instance"], endpoint["document"], "attach"))["ok"])
+                result = client.transact(probe.envelope(
+                    endpoint["instance"], endpoint["document"], "call",
+                    tool="get_pattern_context", arguments={}))
+                self.assertTrue(result["ok"], result)
+                self.assertEqual(result["context"]["pattern"], 0)
+                self.assertEqual(result["context"]["range"], {
+                    "first_row": 0, "row_count": result["context"]["rows"],
+                    "first_channel": 0, "channel_count": result["context"]["channels"],
+                })
+            finally:
+                client.close()
+                if preference is not None and self.checked_control(app, "Always allow Pattern switching") != preference:
+                    self.click_control(app, "Always allow Pattern switching")
+                self.stop_app(app, stop)
+
     def test_switch_wait_rejection_release_and_document_close(self):
         for action in ("reject", "release", "close"):
             with self.subTest(action=action), tempfile.TemporaryDirectory(prefix="openmpt-ai-wait-") as directory:

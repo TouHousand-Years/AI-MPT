@@ -60,4 +60,4 @@ include_dependency "mpt-libopenmpt.lua"
 	end
 
   filter {}
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }

@@ -61,7 +61,7 @@ include_dependency "../../build/premake/ext-vst.lua"
 		defines { "MPT_CHECK_WINDOWS_IGNORE_WARNING_NO_UNICODE" }
 	end
   warnings "Extra"
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }
   filter { "architecture:x86" }
    targetsuffix "-x86"
   filter { "architecture:x86_64" }
@@ -153,7 +153,7 @@ include_dependency "../../build/premake/ext-vst.lua"
 		defines { "MPT_CHECK_WINDOWS_IGNORE_WARNING_NO_UNICODE" }
 	end
   warnings "Extra"
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }
   filter { "architecture:x86" }
    targetsuffix "-x86"
   filter { "architecture:x86_64" }

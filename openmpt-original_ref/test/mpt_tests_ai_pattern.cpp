@@ -129,6 +129,11 @@ void AIPatternTests(const CString &fixture)
 		Require(context["timing"]["default_tempo"] == 125 && context["timing"]["default_speed"] == 6
 			&& context["timing"]["rows_per_beat"] == 4 && context["timing"]["rows_per_measure"] == 16, "Fixture timing");
 		Require(context["format"]["name"] == "mptm" && context["format"]["volume_max"] == 64, "Format write limits");
+		Require(context["format"]["special_notes"] == AI::Json::array({
+			AI::Json{{"id", NOTE_KEYOFF}, {"kind", "note_off"}},
+			AI::Json{{"id", NOTE_NOTECUT}, {"kind", "note_cut"}},
+			AI::Json{{"id", NOTE_FADE}, {"kind", "note_fade"}}}),
+			"Format publishes every writable special note");
 		Require(context["format"]["volume_commands"].is_array() && context["format"]["volume_commands"].size() > 2
 			&& context["format"]["effect_commands"].is_array() && context["format"]["effect_commands"].size() > 2,
 			"Format publishes editable volume and effect command catalogs");
@@ -341,10 +346,29 @@ void AIPatternTests(const CString &fixture)
 		editSpecial["cells"][0]["cell"]["effect_command"] = CMD_TEMPO;
 		editSpecial["cells"][0]["cell"]["effect_parameter"] = 125;
 		Require(OK(cap.Call("replace_pattern_segment", editSpecial)), "Effect columns remain editable beside a preserved special note");
-		auto changedSpecial = Segment(token, 1, NOTE_NOTECUT);
-		changedSpecial["cells"][0]["cell"]["instrument"] = 1;
-		Require(!OK(cap.Call("replace_pattern_segment", changedSpecial)), "Unsupported special-note identity remains protected");
+		for(const auto note : {NOTE_KEYOFF, NOTE_NOTECUT, NOTE_FADE})
+		{
+			const char *kind = note == NOTE_KEYOFF ? "note_off" : note == NOTE_NOTECUT ? "note_cut" : "note_fade";
+			auto changedSpecial = Segment(token, 1, note);
+			changedSpecial["cells"][0]["cell"]["instrument"] = 1;
+			Require(OK(cap.Call("replace_pattern_segment", changedSpecial)), "Every advertised special note is writable");
+			const auto candidate = cap.Call("get_pattern_context", {{"session", token}, {"range", {{"first_row", 0}, {"row_count", 1}, {"first_channel", 1}, {"channel_count", 1}}}});
+			Require(OK(candidate) && candidate["context"]["cells"][0]["raw"]["note"] == note
+				&& candidate["context"]["cells"][0]["note_kind"] == kind, "Special-note write round-trips semantically");
+		}
 		cap.ForceRelease(); cell = saved;
+	}
+	{
+		auto &sf = doc->GetSoundFile();
+		const auto savedType = sf.GetType();
+		sf.ChangeModTypeTo(MOD_TYPE_MOD, false);
+		AI::PatternCapability cap(*doc, 0, {});
+		const auto read = cap.Call("get_pattern_context", {{"occupy", true}});
+		const auto token = read.at("session");
+		Require(read["context"]["format"]["special_notes"].empty(), "A format without special-note support advertises none");
+		Require(!OK(cap.Call("replace_pattern_segment", Segment(token, 1, NOTE_FADE))), "An unadvertised special note remains rejected");
+		cap.ForceRelease();
+		sf.ChangeModTypeTo(savedType, false);
 	}
 	{
 		AI::PatternCapability cap(*doc, 0, PatternRect(PatternCursor(0, 0), PatternCursor(7, 0, PatternCursor::lastColumn)));

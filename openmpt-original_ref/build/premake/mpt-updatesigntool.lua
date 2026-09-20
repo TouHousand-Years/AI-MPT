@@ -51,4 +51,4 @@ include_dependency "ext-nlohmann-json.lua"
 	end
   warnings "Extra"
   filter {}
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }

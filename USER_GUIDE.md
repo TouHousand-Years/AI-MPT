@@ -137,13 +137,13 @@ codex mcp add openmpt -- python C:/Users/qnhxx/Documents/AI-Projects/Code/OpenMP
 每次开始协作前：
 
 1. 打开需要处理的模块文件。
-2. 进入传统 **Patterns** 页，选择目标 Pattern。
-3. 如果只希望 Agent 修改一部分内容，在 Patterns 页框选对应行和通道。
+2. 若要指定目标 Pattern 或限制范围，进入传统 **Patterns** 页选择 Pattern，并框选对应行和通道。
+3. 若已开启 `Always allow Pattern switching` 且希望使用 Order 中的首个 Pattern，可以不框选范围，也无需先打开 Patterns 页。
 4. 打开 **AI / MCP** 页。
 5. 确认上方状态为 `Status: MCP ready`。
 6. 单击 `Connect active doc to Codex`。
 
-Agent 会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**。钢琴卷帘中的音符选择不会成为 Agent 的授权范围。仅仅切换窗口焦点也不会自动改变 Codex 目标；最后一次单击连接按钮发布的文档才是当前目标。
+Agent 通常会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**；若开启了 `Always allow Pattern switching` 且没有框选范围，则改为绑定当前 Sequence 的首个有效 Order Pattern，并授权整张 Pattern。钢琴卷帘中的音符选择不会成为 Agent 的授权范围。仅仅切换窗口焦点也不会自动改变 Codex 目标；最后一次单击连接按钮发布的文档才是当前目标。
 
 之后要让 Agent 编辑同一文档中的另一个 Pattern，不必重新连接：让 Agent 申请切换并在 AI / MCP 页批准即可。人工在 Patterns 页或钢琴卷帘中导航 Pattern 不会改变 Agent 的绑定目标。
 
@@ -151,7 +151,7 @@ Agent 会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**。
 
 - `Enable MCP` 是否开启，以及状态是否已经变为 ready。
 - 当前是否存在活动文档。
-- 文档是否至少打开过 Patterns 页。
+- 文档是否至少打开过 Patterns 页；若要省略此步骤，需开启 `Always allow Pattern switching`，且当前 Sequence 中至少有一个有效 Pattern。
 - 是否还有未结束的 Agent 会话或等待审核的提案。
 
 ### 3. AI / MCP 页面
@@ -164,7 +164,7 @@ Agent 会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**。
 | --- | --- |
 | `Enable MCP` | 启动或停止本地 MCP 服务。默认开启。 |
 | `Always approve range expansion` | 自动批准 Agent 超出初始选区的编辑范围。默认关闭。 |
-| `Always allow Pattern switching` | 自动批准后续合法的 Pattern 切换请求。默认关闭，与范围扩展设置相互独立；开启时若已有切换请求在等待，会立即尝试批准。 |
+| `Always allow Pattern switching` | 自动批准后续合法的 Pattern 切换请求。默认关闭，与范围扩展设置相互独立；开启时若已有切换请求在等待，会立即尝试批准；未框选范围时，Agent 默认绑定当前 Sequence 的首个有效 Order Pattern，并取得整张 Pattern 的范围。 |
 | `Always accept submissions` | 提交冻结后立即尝试应用。默认关闭，与上述两项相互独立；开启时若已有待审核提案，会立即尝试应用一次。 |
 | 秒数输入框 | 设置空闲会话超时，范围 1–3600 秒，默认 300 秒。 |
 | `Save settings (seconds)` | 保存上述开关和超时设置。 |
@@ -210,8 +210,8 @@ Agent 会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**。
 | 读取 Pattern 顺序 | 列出当前 Sequence 的每个 Order 条目，保留重复引用、跳过、停止与无效引用，并列出未被引用的有效 Pattern。只读，不申请占用，也不要求打开 Patterns 页。 |
 | 重排 / 补入 Pattern 顺序 | 在持有会话时提交当前 Order 下标的完整排列，并可在目标位置加入 `{pattern: N}`，把当前 Sequence 尚未引用的有效 Pattern N 补入 Order。每个原下标仍必须恰好出现一次，因此已有重复 Pattern、`+++`、`---` 和无效条目都会原样移动，不会被删除或改写；操作立即应用并保留当前 Pattern 绑定和令牌。 |
 | 切换绑定 Pattern | Agent 申请把编辑目标切换到指定编号的 Pattern。已持有会话时必须携带当前令牌；没有会话时可直接申请，批准后会建立新的 Agent 会话。批准后目标 Pattern 全量重新捕获为基线并返回新令牌，全部行和通道获得授权。若格式范围内的目标不存在且 Order 尚有容量，批准会先按源 Pattern 行数创建目标，并追加到当前 Order 的有效末尾。 |
-| 读取 Pattern 上下文 | 获取当前候选或原始基线、节拍、格式、乐器、稀疏单元格，以及当前格式可写的音量/效果命令编号和参数范围。 |
-| 替换单通道连续片段 | 在私有候选中累积修改，不直接写入文档；可创建、更改或清除当前模块格式支持的全部音量列与效果列命令。 |
+| 读取 Pattern 上下文 | 获取当前候选或原始基线、节拍、格式、乐器、稀疏单元格，以及当前格式可写的特殊音符、音量/效果命令编号和参数范围。 |
+| 替换单通道连续片段 | 在私有候选中累积修改，不直接写入文档；可创建、更改或清除当前模块格式支持的普通音符、Note Off（`===`）、Note Cut（`^^^`）、Note Fade（`~~~`）以及全部音量列与效果列命令。特殊音符以读取上下文公布的目录为准。 |
 | 提交审核 | 冻结完整候选并释放 Agent 占用。默认转入人工审核；开启“总是接受提交”后立即尝试原子应用。 |
 | 取消会话 | 丢弃整个候选。 |
 | 释放只读占用 | 结束没有修改的分析会话。 |
@@ -236,6 +236,7 @@ Agent 开始编辑后，下部状态会显示 `AI OCCUPIED`。此时：
 - 单击 `Approve Pattern switch` 后，目标会重新捕获为全新基线并返回新令牌；原绑定与旧令牌失效。
 - 单击 `Reject Pattern switch` 保留原绑定；请求来自已有会话的 Agent 时令牌和候选都不变并刷新空闲超时，否则释放等待中的保留。
 - 已开启 `Always allow Pattern switching` 时，合法请求自动批准；开启该设置时若已有请求在等待，会立即尝试批准。
+- 已开启该设置且没有框选范围时，初次读取无需先打开 Patterns 页：Agent 会按当前 Sequence 的 Order 顺序绑定第一个有效 Pattern，并以其全部行、全部通道为初始范围；若存在真实框选，仍优先使用框选所在 Pattern 和范围。
 - 等待中的切换请求同样暂停空闲超时；强制释放、断连或关闭文档会终止等待，批准时还会重新验证目标与会话。
 
 有未提交的候选修改或待审核提案时，切换会被拒绝，需要先应用、拒绝或取消当前工作。切换到既有 Pattern 不修改 Sequence、Order 内容或播放位置；创建缺失目标时会追加一个 Order 引用。重复的 Order 引用仍然编辑同一个 Pattern。人工在 Patterns 页或钢琴卷帘中导航不会改变 Agent 的绑定目标。

@@ -346,6 +346,18 @@ CViewPattern *PatternView(CModDoc &doc)
 	return nullptr;
 }
 
+// The automatic-switch preference also opts into an unambiguous default
+// binding when the user has not drawn a Pattern selection. Follow the active
+// Sequence rather than Pattern allocation order, and ignore stop/skip/invalid
+// entries until the first Pattern that can actually be captured.
+PATTERNINDEX FirstOrderPattern(CModDoc &doc)
+{
+	const auto &sf = doc.GetSoundFile();
+	for(const auto pattern : sf.Order())
+		if(sf.Patterns.IsValidPat(pattern)) return pattern;
+	return PATTERNINDEX_INVALID;
+}
+
 // Approved Pattern switches must be visible on the Patterns page without
 // touching the Sequence, the Order selection or playback. The dedicated AI
 // page replaces the lower Patterns view, so when no live CViewPattern exists the
@@ -761,8 +773,19 @@ public:
 		if(tool == "get_pattern_context" && !args.contains("session") && (!capability || (!capability->Occupied() && !capability->PendingSwitch() && !capability->HasProposal())))
 		{
 			auto *view = PatternView(*target);
-			if(!view) return Failure("patternRequired", "Open the document's Patterns tab first");
-			capability = std::make_unique<PatternCapability>(*target, view->GetCurrentPattern(), view->AISelection());
+			const auto selection = view ? view->AISelection() : std::nullopt;
+			PATTERNINDEX pattern = PATTERNINDEX_INVALID;
+			if(selection)
+				pattern = view->GetCurrentPattern();
+			else if(alwaysSwitch.GetCheck() == BST_CHECKED)
+				pattern = FirstOrderPattern(*target);
+			else if(view)
+				pattern = view->GetCurrentPattern();
+			else
+				return Failure("patternRequired", "Open the document's Patterns tab first");
+			if(!target->GetSoundFile().Patterns.IsValidPat(pattern))
+				return Failure("patternRequired", "The current Sequence does not contain a valid Pattern");
+			capability = std::make_unique<PatternCapability>(*target, pattern, selection);
 			document = target;
 		}
 		if(!capability || document != target) return Failure("occupancyLost", "Start with an occupied context read");

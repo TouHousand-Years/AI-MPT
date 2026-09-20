@@ -133,7 +133,7 @@ include_dependency "ext-stb_vorbis.lua"
    defines { "LIBOPENMPT_BUILD_DLL" }
   filter { "kind:SharedLib" }
   filter {}
-  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd $(IntDir)" }
+  prebuildcommands { "..\\..\\build\\svn_version\\update_svn_version_vs_premake.cmd \"$(IntDir)\"" }
 
 function mpt_use_libopenmpt_small ()
 	filter {}
