@@ -1,5 +1,40 @@
-.scratch/ai-build.log
-.scratch/ai-native-test.txt
-.scratch/probe/
-.scratch/ai-test-bin/
-.scratch/ai-pattern-demo.json
+# Local drafts, logs, generated reports, and temporary build/test output
+/.scratch/
+
+# Agent-facing instructions, skills, and local AI-tool configuration
+/.agents/
+/.codex/
+/.claude/
+/AGENTS.md
+/CLAUDE.md
+/CONTEXT.md
+
+# Personal editor and knowledge-base state
+/.vs/
+/.vscode/
+/.obsidian/
+
+# Machine-local convenience files
+/OpenMPT.exe.lnk
+
+# Project test suites, fixtures, and fuzzing inputs
+/test-fixtures/
+/sidecar/test_*.py
+/openmpt-original_ref/test/
+/openmpt-original_ref/**/test/
+/openmpt-original_ref/**/tests/
+/openmpt-original_ref/**/testing/
+/openmpt-original_ref/contrib/fuzzing/
+/JuceOPLVSTi-master/dro2midi/gen_test_midi.cpp
+
+# Python caches and test-tool output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Common local temporary files
+*.tmp
+*.temp
+*~
