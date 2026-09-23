@@ -1,7 +1,0 @@
-test_manual_switch_and_enable_automatic_acceptance (sidecar.test_native_integration.NativeIntegrationTests.test_manual_switch_and_enable_automatic_acceptance) ... ok
-test_order_read_before_session_and_from_another_connection (sidecar.test_native_integration.NativeIntegrationTests.test_order_read_before_session_and_from_another_connection) ... ok
-
-----------------------------------------------------------------------
-Ran 2 tests in 15.130s
-
-OK

@@ -1,4 +1,0 @@
-interface:
-  display_name: "OpenMPT Pattern MCP"
-  short_description: "Read Pattern order, switch the bound Pattern, and review Pattern proposals"
-  default_prompt: "Use the connected OpenMPT Pattern MCP to inspect the current Sequence order and Score Context, then complete my requested Pattern task safely."

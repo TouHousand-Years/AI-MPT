@@ -1,6 +1,0 @@
-test_disconnected_switch_request_releases_reservation (sidecar.test_native_integration.NativeIntegrationTests.test_disconnected_switch_request_releases_reservation) ... ok
-
-----------------------------------------------------------------------
-Ran 1 test in 2.468s
-
-OK
