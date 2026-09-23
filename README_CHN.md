@@ -10,3 +10,7 @@ AI-MPT 是基于 [OpenMPT](https://openmpt.org/) 开发的音乐创作项目。�
 - **AI / MCP 协作**：通过本机 MCP Sidecar 让 Agent 读取 Pattern、修改候选内容，以及管理当前 Sequence 的 Pattern 顺序和切换编辑目标。Agent 的修改先保存在候选提案中；默认由用户在 OpenMPT 内审核并应用整份提案，也可显式开启自动接受提交。
 
 钢琴卷帘编辑默认关闭，当前仍属实验性功能。使用条件、MCP 客户端配置和完整操作步骤请阅读[中文用户指南](USER_GUIDE_CHN.md)。
+
+## 开源协议
+
+AI-MPT 的原创贡献和 OpenMPT 代码采用 [BSD 3-Clause 协议](LICENSE)。OpenMPT 原始协议保留在 [openmpt-src/LICENSE](openmpt-src/LICENSE)，所引入源码的版本记录见 [UPSTREAM.md](UPSTREAM.md)。

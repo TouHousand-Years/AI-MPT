@@ -10,3 +10,7 @@ This project adds two features to OpenMPT's Tracker workflow:
 - **AI / MCP collaboration:** A local MCP sidecar lets an Agent read Patterns, prepare candidate edits, manage the current Sequence's Pattern order, and request a different Pattern as its editing target. Edits stay in a proposal until the user reviews and applies the whole proposal in OpenMPT by default. Automatic acceptance is available only when explicitly enabled.
 
 Piano Roll editing is off by default and remains experimental. For requirements, MCP client setup, and full instructions, see the [English User Guide](USER_GUIDE_EN.md).
+
+## License
+
+AI-MPT's original contributions and the OpenMPT code are distributed under the [BSD 3-Clause License](LICENSE). The original OpenMPT license is retained at [openmpt-src/LICENSE](openmpt-src/LICENSE), and the imported source revision is recorded in [UPSTREAM.md](UPSTREAM.md).
