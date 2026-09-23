@@ -1,16 +1,10 @@
-# OpenMPT for AI 用户操作指南
+# AI-MPT 用户操作指南
+
+[English](USER_GUIDE_EN.md) · 简体中文
 
 本指南面向使用本项目构建版 OpenMPT 的音乐创作者，介绍两条工作流：在钢琴卷帘中查看或编辑 Tracker Pattern，以及通过支持 MCP 的 Agent 生成候选修改并由用户审核。钢琴卷帘默认关闭编辑；编辑功能目前是实验性的，需要手动开启并确认。
 
 当前版本仍以 **Tracker Pattern** 作为唯一的乐曲数据。钢琴卷帘是它的图形化编辑视图；Agent 只在私有候选中生成 Pattern 修改提案，默认必须由用户在审核区应用。只有用户显式开启持久化选项 **总是接受提交** 后，冻结的提案才会在通过修订检查、单元格验证和 Undo 准备后自动应用；自动应用失败时文档不变，提案保留待人工处理。
-
-## Pattern 切换简介
-
-Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不同的事：你在 Patterns 页或钢琴卷帘中选择另一个 Pattern，只会改变自己的查看位置；Agent 仍绑定原 Pattern。只有 Agent 调用 `switch_pattern` 并获得批准后，编辑目标才会改变。
-
-一次 Agent 会话只绑定一个 Pattern。切换时使用 Sequence 中的零基 Pattern 编号；批准后，目标 Pattern 会重新捕获完整基线，并返回新的会话令牌，旧令牌失效。当前 Pattern 重复出现在多个 Order 位置时，它们仍指向同一个 Pattern，不会产生不同副本。
-
-如果要连续编辑多个 Pattern，应按以下顺序操作：先完成并审核或取消当前 Pattern 的候选修改，再申请切换；确认返回 `switched` 后重新读取目标 Pattern，完成核验后再提交。每份提案和每次 Undo 都只作用于一个 Pattern，不能把多个 Pattern 合并为一份草稿。
 
 ## 一、钢琴卷帘窗口
 
@@ -307,6 +301,12 @@ Agent 完成候选后，会把整份修改冻结为单个 Pattern 的提案并�
 - 多个 OpenMPT 实例共享同一个当前用户目标文件；最后一次连接按钮操作决定 Agent 客户端的目标。
 
 Agent 已持有会话时，新发布的文档不会抢走旧会话。应先让 Agent 提交、取消或释放旧会话，再对新目标发起调用。
+
+Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不同的事：你在 Patterns 页或钢琴卷帘中选择另一个 Pattern，只会改变自己的查看位置；Agent 仍绑定原 Pattern。只有 Agent 调用 `switch_pattern` 并获得批准后，编辑目标才会改变。
+
+一次 Agent 会话只绑定一个 Pattern。切换时使用 Sequence 中的零基 Pattern 编号；批准后，目标 Pattern 会重新捕获完整基线，并返回新的会话令牌，旧令牌失效。当前 Pattern 重复出现在多个 Order 位置时，它们仍指向同一个 Pattern，不会产生不同副本。
+
+如果要连续编辑多个 Pattern，应按以下顺序操作：先完成并审核或取消当前 Pattern 的候选修改，再申请切换；确认返回 `switched` 后重新读取目标 Pattern，完成核验后再提交。每份提案和每次 Undo 都只作用于一个 Pattern，不能把多个 Pattern 合并为一份草稿。
 
 ## 三、推荐协作顺序
 
