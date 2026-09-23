@@ -20,11 +20,11 @@
 # Project test suites, fixtures, and fuzzing inputs
 /test-fixtures/
 /sidecar/test_*.py
-/openmpt-original_ref/test/
-/openmpt-original_ref/**/test/
-/openmpt-original_ref/**/tests/
-/openmpt-original_ref/**/testing/
-/openmpt-original_ref/contrib/fuzzing/
+/openmpt-src/test/
+/openmpt-src/**/test/
+/openmpt-src/**/tests/
+/openmpt-src/**/testing/
+/openmpt-src/contrib/fuzzing/
 /JuceOPLVSTi-master/dro2midi/gen_test_midi.cpp
 
 # Python caches and test-tool output

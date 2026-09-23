@@ -34,10 +34,10 @@ The independent application and its imported upstream history currently live in
 one project Git repository. The official OpenMPT GitHub mirror and SVN
 repository remain read-only reference sources.
 
-The imported upstream source uses the existing provenance prefix:
+The imported upstream source currently lives at:
 
 ```text
-openmpt-original_ref/
+openmpt-src/
 ```
 
 The completed historical import retained reachable upstream history and created
@@ -59,7 +59,7 @@ comparison was not performed and is no longer required for the current effort.
 
 | Item | Current value | Interpretation |
 | --- | --- | --- |
-| Source path | `openmpt-original_ref/` | One downstream source prefix already exists. |
+| Source path | `openmpt-src/` | Current downstream source location; renamed from `openmpt-original_ref/` after the import. |
 | Source-adding commit | `b42d5c34ddc825a06bd070ee004f9c5d42df285b` | A project commit, not upstream ancestry. |
 | Historical source tree object | `91900a5706884d9b972c55f7f637000a65c3425d` | Provisional snapshot tree before correction. |
 | Historical snapshot files | 7,373 | Provisional project snapshot before correction. |
@@ -97,8 +97,9 @@ nested dependency build files even though those paths are tracked upstream.
 On 2026-08-29, the old leftovers inside `openmpt-original_ref/` were removed
 with a target-scoped cleanup, and the prefix was repopulated with
 `git read-tree --prefix=openmpt-original_ref/` from the immutable baseline tag.
-The current prefix contains all 7,539 baseline paths; no hand-copy or
-force-add was used.
+The prefix contained all 7,539 baseline paths after the correction; no hand-copy
+or force-add was used. It was later renamed to `openmpt-src/` because the source
+is now the project's development tree, not an untouched reference copy.
 
 Generated build outputs may be created as needed by the local development loop.
 No manifest or exact baseline path-set proof is required by the current map.
@@ -106,7 +107,7 @@ No manifest or exact baseline path-set proof is required by the current map.
 ## Current scope status
 
 - The full-history Git import, annotated tag, and installation of the recorded
-  Git tree under `openmpt-original_ref/` are complete historical facts.
+  Git tree under the former `openmpt-original_ref/` prefix are complete historical facts.
 - The canonical SVN export comparison and deterministic cross-system manifest
   were not completed. They are deliberately abandoned as current gates.
 - Local development may change, remove, reorganize, or wrap the Starting
