@@ -1,6 +1,6 @@
 # OpenMPT for AI 用户操作指南
 
-本指南面向使用本项目构建版 OpenMPT 的音乐创作者，介绍当前已经可用的两条工作流：在钢琴卷帘中直接编辑 Tracker Pattern，以及通过 Codex Agent 生成候选修改并由用户审核。
+本指南面向使用本项目构建版 OpenMPT 的音乐创作者，介绍两条工作流：在钢琴卷帘中查看或编辑 Tracker Pattern，以及通过支持 MCP 的 Agent 生成候选修改并由用户审核。钢琴卷帘默认关闭编辑；编辑功能目前是实验性的，需要手动开启并确认。
 
 当前版本仍以 **Tracker Pattern** 作为唯一的乐曲数据。钢琴卷帘是它的图形化编辑视图；Agent 只在私有候选中生成 Pattern 修改提案，默认必须由用户在审核区应用。只有用户显式开启持久化选项 **总是接受提交** 后，冻结的提案才会在通过修订检查、单元格验证和 Undo 准备后自动应用；自动应用失败时文档不变，提案保留待人工处理。
 
@@ -26,18 +26,28 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 | `Instrument` | 选择新建音符使用的乐器；无乐器模块中则选择 Sample。 |
 | `Snap` | 开启或关闭行吸附。 |
 | `1 / 2 / 4 / 8` | 设置吸附的行数，也决定双击新建音符的默认长度。 |
-| `Split by instrument` | 按乐器和音符重叠关系重新整理通道。该操作可能影响整个文档中的多个 Pattern。 |
+| `Allow editing` | 默认关闭。勾选并确认实验性编辑提示后，才允许在钢琴卷帘中写入音符；取消勾选可恢复只读浏览。 |
+| `Split by instrument` | 开启编辑后才能使用；按乐器和音符重叠关系重新整理通道。该操作可能影响整个文档中的多个 Pattern。 |
 | `Undo / Redo` | 撤销或重做钢琴卷帘产生的 Pattern 修改。 |
 | `Play / Stop` | 播放当前 Pattern 或停止播放。 |
 | `Follow Song` | 播放时让横向视图跟随当前播放行。 |
 
 画布横向表示 Pattern 行和时间，纵向表示音高。顶部标尺显示行号与节拍，小节和拍线使用不同强度显示；左侧钢琴键盘和顶部标尺在滚动时保持可见。音符颜色按照乐器区分，较宽的音符会显示乐器名称以及已有的音量、效果信息。
 
-### 2. 新建与试听音符
+默认状态下可以查看、选择、复制和试听音符，但不能插入、拖动、调整长度、删除、剪切、粘贴或执行 `Split by instrument`。`Undo / Redo` 不受此开关控制；若已有可撤销记录，它们仍可能改变文档。
 
-1. 在 `Instrument` 中选择一个已有乐器或 Sample。
-2. 根据需要开启 `Snap` 并选择 1、2、4 或 8 行。
-3. 在空白网格中双击，即可在对应行和音高创建音符。
+### 2. 开启实验性编辑
+
+编辑前先保存工作副本，并检查各通道：**每个通道只应使用一种乐器或 Sample**。这是当前编辑功能的使用前提；如果同一通道混用了多种乐器或 Sample，先在传统 **Patterns** 页检查和整理。`Split by instrument` 只有开启编辑后才可点击，而且可能改动整个文档，不宜把它当成开启编辑前的准备步骤。
+
+勾选 `Allow editing` 后，程序会弹出 **Experimental Piano Roll Editing** 确认框，提示此功能仍有错误且要求每个通道只使用一种乐器或 Sample。选择允许后才会保持勾选并开放编辑；取消确认则继续保持只读。用完可取消勾选，重新进入只读浏览。这个开关只控制钢琴卷帘编辑，不决定 Agent 是否能够编辑。
+
+### 3. 新建与试听音符
+
+1. 按上一节开启 `Allow editing`。
+2. 在 `Instrument` 中选择一个已有乐器或 Sample。
+3. 根据需要开启 `Snap` 并选择 1、2、4 或 8 行。
+4. 在空白网格中双击，在对应行和音高创建音符。
 
 新音符默认从吸附后的行开始；开启吸附时，其初始长度等于吸附行数，否则长度为 1 行。
 
@@ -47,7 +57,7 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 - 聚焦画布后，可使用 `Z S X D C V G B H N J M` 这一排键试听从 C-5 开始的十二个半音。
 - 松开按键或鼠标后停止本次试听。键盘试听当前只负责预听，不会录入 Pattern。
 
-### 3. 选择音符
+### 4. 选择音符
 
 - 单击一个音符：只选择该音符。
 - `Ctrl` + 单击：把音符加入选择，或从选择中移除。
@@ -57,7 +67,7 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 
 选中的音符会显示高对比度双层边框。切换 Pattern 后，当前选择会被清除。
 
-### 4. 移动、移调和调整长度
+### 5. 移动、移调和调整长度
 
 - 拖动已选择的音符主体：同时改变时间位置和音高；多选时整体移动。
 - 拖动音符左边缘：改变起始行，同时保持结束位置。
@@ -69,7 +79,7 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 
 只有支持明确 Note Off 事件的模块格式才能可靠写入音符长度。如果当前格式不支持，画布顶部会显示原因，左右边缘调整长度也不可用。
 
-### 5. 删除、复制和粘贴
+### 6. 删除、复制和粘贴
 
 - 右键单击音符：删除该音符；如果它属于多选，则删除整组选择。
 - `Delete` 或 `Backspace`：删除全部选中音符。
@@ -79,7 +89,7 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 
 钢琴卷帘使用自己的内部剪贴板，不与传统 Pattern 编辑器或 Windows 系统剪贴板共享格式。复制内容保存相对时间、音高、通道、乐器、音量和长度；粘贴后仍会按照当前的通道路由规则放置。
 
-### 6. 滚动与缩放
+### 7. 滚动与缩放
 
 - 鼠标滚轮和滚动条：浏览画布。
 - `Ctrl` + 滚轮：改变每行的横向宽度，也就是时间轴缩放。
@@ -88,7 +98,7 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 
 开启 `Follow Song` 后，播放到当前 Pattern 时，视图会自动把播放行保持在画面中。需要自由浏览其他位置时可暂时关闭它。
 
-### 7. 通道路由与 Tracker 数据
+### 8. 通道路由与 Tracker 数据
 
 钢琴卷帘显示的是 Pattern 中的 pitched notes。音符长度根据同一通道后续的音符、Note Off、Note Cut、Note Fade 或相关终止效果推导。
 
@@ -99,26 +109,26 @@ Pattern 切换分为“人工视图切换”和“Agent 绑定切换”两件不
 3. 重叠音符落到额外层；必要时可增加通道。
 4. 在格式支持时，为音符结束位置写入 Note Off。
 
-这套重新分配规则会在钢琴卷帘编辑时保持一致，并可能整理文档中其他 Pattern 的音符通道。`Split by instrument` 会显式对整个文档执行同样的整理。操作会作为一个整体进入 OpenMPT 原生 Undo；如果无法完整准备 Undo、超过格式最大通道数，或会覆盖无法安全表达的 Tracker 专用数据，则整个操作失败且不写入部分结果。
+这套重新分配规则会在钢琴卷帘编辑时保持一致，并可能整理文档中其他 Pattern 的音符通道。`Split by instrument` 会显式对整个文档执行同样的整理，且仅在 `Allow editing` 开启时可用。操作会作为一个整体进入 OpenMPT 原生 Undo；如果无法完整准备 Undo、超过格式最大通道数，或会覆盖无法安全表达的 Tracker 专用数据，则整个操作失败且不写入部分结果。由于编辑功能仍属实验阶段，执行后应回到 Patterns 页检查通道内容并试听结果。
 
 效果命令、特殊音符和非普通音量命令仍属于 Tracker 专用数据。钢琴卷帘会尽量保留它们；当它们与目标音符位置冲突时，会拒绝修改并提示原因。遇到这种情况，请回到 **Patterns** 页检查相应单元格。
 
-### 8. 与 Agent 会话同时使用
+### 9. 与 Agent 会话同时使用
 
-当 Agent 持有编辑会话时，钢琴卷帘会显示只读提示。此时仍可滚动、查看、试听和播放，但写操作被阻止。完成、取消或强制释放 Agent 会话后才能继续人工编辑。
+当 Agent 持有编辑会话时，钢琴卷帘会显示只读提示。此时仍可滚动、查看、试听和播放，但写操作被阻止；即使 `Allow editing` 已开启也一样。完成、取消或强制释放 Agent 会话后，人工编辑仍须满足上述开关与通道前提。
 
 ## 二、Agent 协作
 
-### 1. 首次配置 Codex
+### 1. 首次配置 Agent 客户端
 
-当前 MCP Sidecar 需要 Windows 和 Python 3.10 或更高版本。推荐只配置一次自动目标模式。
+当前 MCP Sidecar 需要 Windows 和 Python 3.10 或更高版本。先找到本项目 `sidecar/openmpt_mcp.py` 的绝对路径；以下示例中的 `C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py` 是占位路径，须替换为你自己电脑上的实际路径。推荐只配置一次 `--auto-target` 模式。
 
-在用户级 `~/.codex/config.toml`，或受信任项目的 `.codex/config.toml` 中加入：
+**Codex：** 在用户级 `~/.codex/config.toml`，或受信任项目的 `.codex/config.toml` 中加入：
 
 ```toml
 [mcp_servers.openmpt]
 command = "python"
-args = ["C:/Users/qnhxx/Documents/AI-Projects/Code/OpenMPT-for-AI/sidecar/openmpt_mcp.py", "--auto-target"]
+args = ["C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py", "--auto-target"]
 required = false
 startup_timeout_sec = 10
 tool_timeout_sec = 300
@@ -127,10 +137,32 @@ tool_timeout_sec = 300
 也可以执行一次：
 
 ```powershell
-codex mcp add openmpt -- python C:/Users/qnhxx/Documents/AI-Projects/Code/OpenMPT-for-AI/sidecar/openmpt_mcp.py --auto-target
+codex mcp add openmpt -- python "C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py" --auto-target
 ```
 
-配置后重启一次 Codex。以后切换 OpenMPT 文档时，只需在 OpenMPT 中重新连接目标，不需要再次修改 Codex 配置。
+**其他支持本机 MCP stdio 服务器的 Agent 软件：** 在软件的 MCP 服务器设置中新增一个名为 `openmpt` 的本地服务器，选择 **stdio / command** 类型，按下列字段填写。各软件的配置入口和字段名称可能不同；这里展示的是字段含义，不是通用的配置文件语法。
+
+| 字段 | 填写内容 |
+| --- | --- |
+| 启动命令（command） | `python`，或该软件能找到的 Python 3.10+ 可执行文件路径。 |
+| 参数（args，按顺序） | ① 本项目 `sidecar/openmpt_mcp.py` 的绝对路径；② `--auto-target`。路径是**一个完整参数**，有空格时不要手工拆开。 |
+| 传输方式 | `stdio`。此 Sidecar 由 Agent 软件作为本地子进程启动，不填写 HTTP URL。 |
+| 工具调用超时（如有） | 建议至少 300 秒，供 OpenMPT 中的人工范围扩展或 Pattern 切换审批使用。 |
+
+如果软件只接受 JSON 配置，下例仅表示常见的字段对应关系；请按该软件自己的文档调整外层键名和放置位置：
+
+```json
+{
+  "mcpServers": {
+    "openmpt": {
+      "command": "python",
+      "args": ["C:/absolute/path/to/OpenMPT-for-AI/sidecar/openmpt_mcp.py", "--auto-target"]
+    }
+  }
+}
+```
+
+配置后按客户端要求重载 MCP 服务器或重启客户端。随后在 OpenMPT 的 **AI / MCP** 页点击 `Connect active doc to Agent`；它发布的当前文档目标可供使用 `--auto-target` 的本机 Agent 客户端读取。切换文档时再次点击此按钮即可，不需要修改服务器启动参数。客户端应在本机运行；如果它只能连接远程 HTTP MCP 服务器，无法直接使用本 Sidecar 的 stdio 配置。
 
 ### 2. 准备 Agent 的目标与范围
 
@@ -141,9 +173,9 @@ codex mcp add openmpt -- python C:/Users/qnhxx/Documents/AI-Projects/Code/OpenMP
 3. 若已开启 `Always allow Pattern switching` 且希望使用 Order 中的首个 Pattern，可以不框选范围，也无需先打开 Patterns 页。
 4. 打开 **AI / MCP** 页。
 5. 确认上方状态为 `Status: MCP ready`。
-6. 单击 `Connect active doc to Codex`。
+6. 单击 `Connect active doc to Agent`。
 
-Agent 通常会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**；若开启了 `Always allow Pattern switching` 且没有框选范围，则改为绑定当前 Sequence 的首个有效 Order Pattern，并授权整张 Pattern。钢琴卷帘中的音符选择不会成为 Agent 的授权范围。仅仅切换窗口焦点也不会自动改变 Codex 目标；最后一次单击连接按钮发布的文档才是当前目标。
+Agent 通常会在第一次读取时绑定 **Patterns 页当前 Pattern 与选区**；若开启了 `Always allow Pattern switching` 且没有框选范围，则改为绑定当前 Sequence 的首个有效 Order Pattern，并授权整张 Pattern。钢琴卷帘中的音符选择不会成为 Agent 的授权范围。仅仅切换窗口焦点也不会自动改变 Agent 目标；最后一次单击连接按钮发布的文档才是当前目标。
 
 之后要让 Agent 编辑同一文档中的另一个 Pattern，不必重新连接：让 Agent 申请切换并在 AI / MCP 页批准即可。人工在 Patterns 页或钢琴卷帘中导航 Pattern 不会改变 Agent 的绑定目标。
 
@@ -168,8 +200,8 @@ Agent 通常会在第一次读取时绑定 **Patterns 页当前 Pattern 与选�
 | `Always accept submissions` | 提交冻结后立即尝试应用。默认关闭，与上述两项相互独立；开启时若已有待审核提案，会立即尝试应用一次。 |
 | 秒数输入框 | 设置空闲会话超时，范围 1–3600 秒，默认 300 秒。 |
 | `Save settings (seconds)` | 保存上述开关和超时设置。 |
-| `Connect active doc to Codex` | 把当前活动文档明确发布为 Codex 目标。 |
-| 状态文本区 | 显示服务状态、Pipe、实例 ID、目标文件和所有打开文档。 |
+| `Connect active doc to Agent` | 把当前活动文档明确发布为使用 `--auto-target` 的 Agent 客户端的目标。 |
+| 状态文本区 | 显示服务状态、Pipe、实例 ID、Agent 目标目录和所有打开文档。 |
 
 下部用于会话和提案审核：
 
@@ -189,7 +221,7 @@ Agent 通常会在第一次读取时绑定 **Patterns 页当前 Pattern 与选�
 
 ### 4. 向 Agent 提出任务
 
-连接完成后，可在同一个 Codex 任务中直接描述音乐目标。尽量说明目标声部、行范围、乐器和希望保留的内容，例如：
+连接完成后，可在 Agent 任务中直接描述音乐目标。尽量说明目标声部、行范围、乐器和希望保留的内容，例如：
 
 ```text
 读取当前 Pattern，为第 2、3 通道补写两声部和声。保持第 1 通道旋律和第 4 通道贝斯不变，完成后交给我审核。
@@ -271,14 +303,14 @@ Agent 完成候选后，会把整份修改冻结为单个 Pattern 的提案并�
 - 切换 Pattern：不必先结束会话。让 Agent 申请 `switch_pattern`，再在 AI / MCP 页批准。已持有会话时 Agent 必须携带当前令牌；没有会话时批准后会建立新的 Agent 会话。批准后目标 Pattern 全量重新捕获为基线并返回新令牌，旧令牌失效。切换到当前 Pattern 只保持原绑定并刷新空闲超时；格式范围内的缺失 Pattern 会在批准时创建并追加到 Order。
 - 人工导航：在 Patterns 页或钢琴卷帘中切换 Pattern 只改变你的视图，不会改变 Agent 的绑定目标；只有已批准的切换才会改变它。
 - 切换到既有 Pattern 不修改 Sequence、Order 内容或播放位置；创建缺失目标时会追加一个 Order 引用。重复的 Order 引用仍指向同一个 Pattern。
-- 切换文档：完成或取消当前工作后，激活新文档，并再次单击 `Connect active doc to Codex`。
-- 多个 OpenMPT 实例共享同一个当前用户目标文件；最后一次连接按钮操作决定 Codex 的目标。
+- 切换文档：完成或取消当前工作后，激活新文档，并再次单击 `Connect active doc to Agent`。
+- 多个 OpenMPT 实例共享同一个当前用户目标文件；最后一次连接按钮操作决定 Agent 客户端的目标。
 
 Agent 已持有会话时，新发布的文档不会抢走旧会话。应先让 Agent 提交、取消或释放旧会话，再对新目标发起调用。
 
 ## 三、推荐协作顺序
 
-1. 在钢琴卷帘或 Patterns 页整理人工起点，并保存工作副本。
+1. 保存工作副本；若要用钢琴卷帘写入，先检查每个通道的乐器使用情况，再开启 `Allow editing` 并确认实验性提示。
 2. 在 Patterns 页选择 Agent 的 Pattern 和初始范围。
 3. 在 AI / MCP 页连接当前文档。
 4. 向 Agent 描述音乐目标和必须保留的声部。

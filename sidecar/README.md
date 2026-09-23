@@ -120,7 +120,7 @@ documents does not require editing or restarting Codex:
 
 1. Open the document and its Patterns tab in OpenMPT.
 2. Open the **AI / MCP** panel.
-3. Click **Connect active doc to Codex**.
+3. Click **Connect active doc to Agent**.
 4. Use the eight Pattern tools from the existing Codex task.
 
 The button atomically publishes the exact pipe, application-lifetime ID,

@@ -530,7 +530,7 @@ public:
 			auto b = std::make_unique<CButton>(); b->Create(text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, rect, this, id); buttons.push_back(std::move(b));
 		};
 		button(SettingsSave, _T("Save settings (seconds)"), CRect(540, 12, 750, 38));
-		button(Publish, _T("Connect active doc to Codex"), CRect(770, 12, 990, 38));
+		button(Publish, _T("Connect active doc to Agent"), CRect(770, 12, 990, 38));
 		identity.Create(WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE | ES_READONLY | ES_AUTOHSCROLL, CRect(12, 48, 1040, 155), this, 20);
 		LayoutChildren();
 		if(enable.GetCheck()) broker = CreateBroker();
@@ -552,7 +552,7 @@ public:
 		CString value = (broker && broker->Running()) ? _T("Status: MCP ready") : _T("Status: MCP stopped / starting");
 		value += _T("\r\nPipe: ") + CString(pipe.c_str()) + _T("\r\nInstance: ") + Text(instance);
 		if(const auto target = CodexTargetPath(); !target.empty())
-			value += _T("\r\nCodex target: ") + CString(target.c_str());
+			value += _T("\r\nAgent target directory: ") + CString(std::filesystem::path(target).parent_path().c_str());
 		value += _T("\r\nOpen documents (probe clients must be given one explicit ID):");
 		for(auto *doc : theApp.GetOpenDocuments())
 		{
@@ -609,7 +609,7 @@ public:
 		if(!buttons.empty()) place(*buttons[0], measure(*buttons[0], _T("Save settings (seconds)"), 120, 240));
 		place(alwaysSwitch, measure(alwaysSwitch, _T("Always allow Pattern switching"), 160, 330));
 		place(alwaysAccept, measure(alwaysAccept, _T("Always accept submissions"), 140, 310));
-		if(buttons.size() > 1) place(*buttons[1], measure(*buttons[1], _T("Connect active doc to Codex"), 130, 260));
+		if(buttons.size() > 1) place(*buttons[1], measure(*buttons[1], _T("Connect active doc to Agent"), 130, 260));
 		y += height + 10;
 		identityRect.SetRect(margin, y, std::max(margin + 18, cx - margin), std::max(y + 18, client.Height() - margin));
 		identity.SetWindowPos(nullptr, identityRect.left, identityRect.top, identityRect.Width(), identityRect.Height(), flags);
@@ -630,7 +630,7 @@ public:
 	{
 		if(!broker || !broker->Running())
 		{
-			lastMessage = _T("Enable MCP and wait for the service to start before connecting Codex.");
+			lastMessage = _T("Enable MCP and wait for the service to start before connecting an Agent.");
 			return;
 		}
 		if(capability && (capability->Occupied() || capability->PendingSwitch() || capability->HasProposal()))
@@ -641,26 +641,26 @@ public:
 		auto *target = CMainFrame::GetMainFrame()->GetActiveDoc();
 		if(!target)
 		{
-			lastMessage = _T("Open and activate a document before connecting Codex.");
+			lastMessage = _T("Open and activate a document before connecting an Agent.");
 			return;
 		}
 		const std::wstring path = CodexTargetPath();
 		if(path.empty())
 		{
-			lastMessage = _T("LOCALAPPDATA is unavailable; the Codex target cannot be published.");
+			lastMessage = _T("LOCALAPPDATA is unavailable; the Agent target cannot be published.");
 			return;
 		}
 		std::error_code directoryError;
 		std::filesystem::create_directories(std::filesystem::path(path).parent_path(), directoryError);
 		if(directoryError)
 		{
-			lastMessage = _T("Could not create the Codex target directory.");
+			lastMessage = _T("Could not create the Agent target directory.");
 			return;
 		}
 		GUID guid{};
 		if(CoCreateGuid(&guid) != S_OK)
 		{
-			lastMessage = _T("Could not create a Codex publication identity.");
+			lastMessage = _T("Could not create an Agent publication identity.");
 			return;
 		}
 		wchar_t id[40]{};
@@ -676,17 +676,17 @@ public:
 			if(!output)
 			{
 				DeleteFileW(temporary.c_str());
-				lastMessage = _T("Could not write the Codex target file.");
+				lastMessage = _T("Could not write the Agent target file.");
 				return;
 			}
 		}
 		if(!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
 		{
 			DeleteFileW(temporary.c_str());
-			lastMessage = _T("Could not publish the Codex target file.");
+			lastMessage = _T("Could not publish the Agent target file.");
 			return;
 		}
-		lastMessage = _T("Active document published to Codex. No MCP reconfiguration is needed.");
+		lastMessage = _T("Active document published for Agent clients. No MCP reconfiguration is needed.");
 		RefreshIdentity();
 	}
 	void HandleDisconnect(const DisconnectNotice &notice)
