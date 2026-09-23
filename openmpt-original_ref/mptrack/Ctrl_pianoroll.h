@@ -15,6 +15,7 @@ private:
 	CComboBox m_pattern, m_instrument, m_snapRows;
 	PATTERNINDEX m_currentPattern = 0;
 	ModCommand::INSTR m_selectedInstrument = 0;
+	bool m_allowEditing = false;
 
 public:
 	CCtrlPianoRoll(CModControlView &parent, CModDoc &document);
@@ -22,6 +23,7 @@ public:
 	PATTERNINDEX GetCurrentPattern() const { return m_currentPattern; }
 	ModCommand::INSTR GetSelectedInstrument() const { return m_selectedInstrument; }
 	ROWINDEX GetSnapRows() const;
+	bool AllowEditing() const { return m_allowEditing; }
 	bool SnapEnabled() const { return IsDlgButtonChecked(IDC_PIANOROLL_SNAP) != BST_UNCHECKED; }
 	bool GetFollowSong() const { return IsDlgButtonChecked(IDC_PIANOROLL_FOLLOWSONG) != BST_UNCHECKED; }
 	PianoRollPattern::ViewFilter GetViewFilter() const;
@@ -44,6 +46,8 @@ private:
 	void OnPatternChanged();
 	void OnInstrumentChanged();
 	void OnViewOptionsChanged();
+	void OnAllowEditingChanged();
+	void UpdateEditControls();
 	void OnSplitChannels();
 	void OnUndo();
 	void OnRedo();

@@ -103,6 +103,7 @@
 #define IDC_PIANOROLL_PLAY              5609
 #define IDC_PIANOROLL_STOP              5610
 #define IDC_PIANOROLL_SPLITCHANNELS     5611
+#define IDC_PIANOROLL_ALLOWEDITING      5612
 #define IDD_SCALE_ENV_POINTS            510
 #define IDD_TUNING                      511
 #define IDD_UPDATE                      512

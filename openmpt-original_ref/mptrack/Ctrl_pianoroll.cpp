@@ -8,6 +8,7 @@
 #include "Moddoc.h"
 #include "Mptrack.h"
 #include "resource.h"
+#include "Reporting.h"
 #include "TrackerSettings.h"
 #include "View_pianoroll.h"
 #include "WindowMessages.h"
@@ -19,6 +20,7 @@ BEGIN_MESSAGE_MAP(CCtrlPianoRoll, CModControlDlg)
 	ON_CBN_SELENDOK(IDC_PIANOROLL_INSTRUMENT, &CCtrlPianoRoll::OnInstrumentChanged)
 	ON_CBN_SELENDOK(IDC_PIANOROLL_SNAPROWS, &CCtrlPianoRoll::OnViewOptionsChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_SNAP, &CCtrlPianoRoll::OnViewOptionsChanged)
+	ON_BN_CLICKED(IDC_PIANOROLL_ALLOWEDITING, &CCtrlPianoRoll::OnAllowEditingChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_FOLLOWSONG, &CCtrlPianoRoll::OnViewOptionsChanged)
 	ON_BN_CLICKED(IDC_PIANOROLL_UNDO, &CCtrlPianoRoll::OnUndo)
 	ON_BN_CLICKED(IDC_PIANOROLL_REDO, &CCtrlPianoRoll::OnRedo)
@@ -56,6 +58,8 @@ BOOL CCtrlPianoRoll::OnInitDialog()
 	m_snapRows.SetCurSel(0);
 	CheckDlgButton(IDC_PIANOROLL_SNAP, BST_CHECKED);
 	CheckDlgButton(IDC_PIANOROLL_FOLLOWSONG, BST_CHECKED);
+	CheckDlgButton(IDC_PIANOROLL_ALLOWEDITING, BST_UNCHECKED);
+	UpdateEditControls();
 	m_initialized = true;
 	return TRUE;
 }
@@ -181,6 +185,27 @@ void CCtrlPianoRoll::OnViewOptionsChanged()
 	}
 }
 
+void CCtrlPianoRoll::OnAllowEditingChanged()
+{
+	m_allowEditing = false;
+	if(IsDlgButtonChecked(IDC_PIANOROLL_ALLOWEDITING) == BST_CHECKED)
+	{
+		m_allowEditing = Reporting::Confirm(
+			_T("Piano Roll editing is experimental and contains bugs.\n\n")
+			_T("Editing requires each track (channel) to use only one instrument or sample.\n\n")
+			_T("Allow editing?"), _T("Experimental Piano Roll Editing"), false, true, this) == cnfYes;
+	}
+	CheckDlgButton(IDC_PIANOROLL_ALLOWEDITING, m_allowEditing ? BST_CHECKED : BST_UNCHECKED);
+	UpdateEditControls();
+}
+
+void CCtrlPianoRoll::UpdateEditControls()
+{
+	GetDlgItem(IDC_PIANOROLL_UNDO)->EnableWindow(m_modDoc.GetPatternUndo().CanUndo());
+	GetDlgItem(IDC_PIANOROLL_REDO)->EnableWindow(m_modDoc.GetPatternUndo().CanRedo());
+	GetDlgItem(IDC_PIANOROLL_SPLITCHANNELS)->EnableWindow(m_allowEditing);
+}
+
 void CCtrlPianoRoll::OnSplitChannels()
 {
 	if(m_hWndView) ::SendMessage(m_hWndView, WM_COMMAND, IDC_PIANOROLL_SPLITCHANNELS, 0);
@@ -208,8 +233,7 @@ void CCtrlPianoRoll::UpdateView(UpdateHint hint, CObject *)
 		RebuildSelectors();
 	if(hint.GetType()[HINT_UNDO])
 	{
-		GetDlgItem(IDC_PIANOROLL_UNDO)->EnableWindow(m_modDoc.GetPatternUndo().CanUndo());
-		GetDlgItem(IDC_PIANOROLL_REDO)->EnableWindow(m_modDoc.GetPatternUndo().CanRedo());
+		UpdateEditControls();
 	}
 }
 

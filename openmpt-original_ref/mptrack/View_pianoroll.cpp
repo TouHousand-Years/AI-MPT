@@ -83,6 +83,12 @@ CCtrlPianoRoll *CViewPianoRoll::GetPanel() const
 	return dynamic_cast<CCtrlPianoRoll *>(const_cast<CViewPianoRoll *>(this)->GetControlDlg());
 }
 
+bool CViewPianoRoll::AllowEditing() const
+{
+	const CCtrlPianoRoll *panel = GetPanel();
+	return panel && panel->AllowEditing();
+}
+
 void CViewPianoRoll::OnInitialUpdate()
 {
 	CModScrollView::OnInitialUpdate();
@@ -175,7 +181,7 @@ void CViewPianoRoll::ToggleSelection(const PianoRollPattern::NoteRef &note)
 
 bool CViewPianoRoll::Commit(PianoRollPattern::Operation operation)
 {
-	if(!m_model) return false;
+	if(!AllowEditing() || !m_model) return false;
 	if(CCtrlPianoRoll *panel = GetPanel()) operation.viewFilter = panel->GetViewFilter();
 	const auto result = m_model->Apply(operation);
 	if(result.applied)
@@ -412,6 +418,11 @@ void CViewPianoRoll::OnLButtonDown(UINT flags, CPoint point)
 	if(const auto hit = HitNote(point, projection))
 	{
 		if(flags & MK_CONTROL) ToggleSelection(hit->id); else if(!IsSelected(hit->id)) SelectOnly(hit->id);
+		if(!AllowEditing())
+		{
+			Invalidate(FALSE);
+			return;
+		}
 		m_dragging = true;
 		m_dragStart = m_dragNow = point;
 		m_dragNote = hit->id;
@@ -451,6 +462,7 @@ void CViewPianoRoll::OnLButtonDown(UINT flags, CPoint point)
 
 bool CViewPianoRoll::InsertAtPoint(CPoint point)
 {
+	if(!AllowEditing()) return false;
 	const auto projection = Projection();
 	if(point.x < KeyboardWidth || point.y < RulerHeight || HitNote(point, projection)) return false;
 	CCtrlPianoRoll *panel = GetPanel();
@@ -585,6 +597,7 @@ BOOL CViewPianoRoll::OnEraseBkgnd(CDC *)
 
 void CViewPianoRoll::CopySelection(bool cut)
 {
+	if(cut && !AllowEditing()) return;
 	const auto projection = Projection();
 	if(m_selection.empty()) return;
 	ROWINDEX firstRow = std::numeric_limits<ROWINDEX>::max();

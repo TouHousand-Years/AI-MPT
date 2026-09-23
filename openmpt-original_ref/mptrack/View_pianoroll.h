@@ -44,6 +44,7 @@ public:
 
 private:
 	CCtrlPianoRoll *GetPanel() const;
+	bool AllowEditing() const;
 	PianoRollPattern::Projection Projection() const;
 	void UpdateScrollSize();
 	void PruneSelection(const PianoRollPattern::Projection &projection);
